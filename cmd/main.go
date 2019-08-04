@@ -1,63 +1,84 @@
 package main
 
+import "C"
 import (
-	"flag"
+	"bufio"
+	"context"
+	"fmt"
+	"github.com/go-vgo/robotgo"
+	"github.com/ipfs/go-log"
+	"github.com/whyrusleeping/go-logging"
+	sharing "github.com/xgreenx/desktop-sharing"
+	"os"
 	"strings"
-
-	dht "github.com/libp2p/go-libp2p-kad-dht"
-	maddr "github.com/multiformats/go-multiaddr"
 )
 
-// A new type we need for writing a custom flag parser
-type addrList []maddr.Multiaddr
+//
+//func readData(rw *bufio.ReadWriter) {
+//	for {
+//		str, err := rw.ReadString('\n')
+//		if err != nil {
+//			fmt.Println("Error reading from buffer")
+//			panic(err)
+//		}
+//
+//		if str == "" {
+//			return
+//		}
+//		if str != "\n" {
+//			// Green console colour: 	\x1b[32m
+//			// Reset console colour: 	\x1b[0m
+//			fmt.Printf("\x1b[32m%s\x1b[0m> ", str)
+//		}
+//
+//	}
+//}
 
-func (al *addrList) String() string {
-	strs := make([]string, len(*al))
-	for i, addr := range *al {
-		strs[i] = addr.String()
-	}
-	return strings.Join(strs, ",")
-}
+func ScanInputCommands(node *sharing.Node) {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		arg := strings.Split(scanner.Text(), " ")
 
-func (al *addrList) Set(value string) error {
-	addr, err := maddr.NewMultiaddr(value)
-	if err != nil {
-		return err
-	}
-	*al = append(*al, addr)
-	return nil
-}
-
-func StringsToAddrs(addrStrings []string) (maddrs []maddr.Multiaddr, err error) {
-	for _, addrString := range addrStrings {
-		addr, err := maddr.NewMultiaddr(addrString)
-		if err != nil {
-			return maddrs, err
+		switch arg[0] {
+		case "list":
+			fmt.Println(node.List())
+		case "screen":
+			err := node.ShareScreen(arg[1])
+			if err != nil {
+				fmt.Println("Got error during sharing ", err)
+			}
+		default:
+			fmt.Println("Unknown command ", arg[0])
 		}
-		maddrs = append(maddrs, addr)
 	}
-	return
 }
 
-type Config struct {
-	RendezvousString string
-	BootstrapPeers   addrList
-	ListenAddresses  addrList
-	ProtocolID       string
+func main() {
+	EvChan := robotgo.Start()
+	defer robotgo.End()
+
+	for ev := range EvChan {
+		fmt.Println("hook: ", ev)
+	}
 }
 
-func ParseFlags() (Config, error) {
-	config := Config{}
-	flag.StringVar(&config.RendezvousString, "rendezvous", "meet me here",
-		"Unique string to identify group of nodes. Share this with your friends to let them connect with you")
-	flag.Var(&config.BootstrapPeers, "peer", "Adds a peer multiaddress to the bootstrap list")
-	flag.Var(&config.ListenAddresses, "listen", "Adds a multiaddress to the listen list")
-	flag.StringVar(&config.ProtocolID, "pid", "/chat/1.1.0", "Sets a protocol id for stream headers")
-	flag.Parse()
-
-	if len(config.BootstrapPeers) == 0 {
-		config.BootstrapPeers = dht.DefaultBootstrapPeers
+func main2() {
+	log.SetAllLoggers(logging.WARNING)
+	log.SetLogLevel("node", "debug")
+	config, err := ParseFlags()
+	if err != nil {
+		panic(err)
 	}
 
-	return config, nil
+	ctx := context.Background()
+
+	node := sharing.NewNode(ctx, config)
+	node.BootStrap()
+
+	if len(config.BootstrapPeers) != 0 {
+		//ScanInputCommands(node)
+		node.ShareScreen("")
+	} else {
+		select {} //ScanInputCommands(node)
+	}
 }
