@@ -40,4 +40,5 @@ type Config struct {
 	BootstrapPeers   addrList
 	ListenAddresses  addrList
 	ScreenProtocolId string
+	PrivateKey       string
 }

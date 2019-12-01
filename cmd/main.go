@@ -53,7 +53,7 @@ func ScanInputCommands(node *sharing.Node) {
 	}
 }
 
-func main() {
+func main2() {
 	EvChan := robotgo.Start()
 	defer robotgo.End()
 
@@ -62,7 +62,7 @@ func main() {
 	}
 }
 
-func main2() {
+func main() {
 	log.SetAllLoggers(logging.WARNING)
 	log.SetLogLevel("node", "debug")
 	config, err := ParseFlags()

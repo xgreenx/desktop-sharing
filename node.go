@@ -2,17 +2,18 @@ package desktop_sharing
 
 import "C"
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"fyne.io/fyne"
-	"fyne.io/fyne/app"
-	"fyne.io/fyne/canvas"
 	"github.com/go-vgo/robotgo"
 	"github.com/ipfs/go-log"
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -21,10 +22,13 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/pixiv/go-libjpeg/jpeg"
+	hook "github.com/robotn/gohook"
+	myfyne "github.com/xgreenx/fyne"
+	myapp "github.com/xgreenx/fyne/app"
+	mycanvas "github.com/xgreenx/fyne/canvas"
 	"image"
 	"io"
 	"sync"
-	"time"
 	"unsafe"
 )
 
@@ -52,8 +56,19 @@ func NewNode(ctx context.Context, config *Config) *Node {
 
 func (n *Node) BootStrap() {
 	var err error
+	b, err := hex.DecodeString(n.config.PrivateKey)
+	if err != nil {
+		panic(err)
+	}
+
+	priv, _, err := crypto.GenerateEd25519Key(bytes.NewBuffer(b))
+	if err != nil {
+		panic(err)
+	}
+
 	n.host, err = libp2p.New(n.context,
 		libp2p.ListenAddrs([]multiaddr.Multiaddr(n.config.ListenAddresses)...),
+		libp2p.Identity(priv),
 	)
 	if err != nil {
 		panic(err)
@@ -131,14 +146,14 @@ func (n *Node) ShareScreen(addr string) error {
 		return err
 	}
 
-	StartScreenReceiving(stream)
+	StartScreenReceiving(stream, bufio.NewWriter(stream))
 
 	return nil
 }
 
 func handleScreenStream(stream network.Stream) {
 	logger.Info("Got a new sharing connection!")
-	StartScreenSharing(stream)
+	StartScreenSharing(stream, bufio.NewReader(stream))
 }
 
 func writeInt(writer io.Writer, val int) {
@@ -159,55 +174,73 @@ func readInt(reader io.Reader) int {
 	return int(binary.LittleEndian.Uint64(b))
 }
 
-func StartScreenSharing(writer io.Writer) {
+func StartScreenSharing(writer io.Writer, reader *bufio.Reader) {
 	w, h := robotgo.GetScreenSize()
 	writeInt(writer, w)
 	writeInt(writer, h)
 	tmp := bytes.NewBuffer([]byte{})
-
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 
-	for {
-		bitmapRef := robotgo.CaptureScreen(0, 0, w, h)
-		bitmap := robotgo.ToBitmap(bitmapRef)
-		gbytes := C.GoBytes(unsafe.Pointer(bitmap.ImgBuf), (C.int)(bitmap.Height*bitmap.Bytewidth))
+	go func() {
+		for {
+			bitmapRef := robotgo.CaptureScreen(0, 0, w, h)
+			bitmap := robotgo.ToBitmap(bitmapRef)
+			gbytes := C.GoBytes(unsafe.Pointer(bitmap.ImgBuf), (C.int)(bitmap.Height*bitmap.Bytewidth))
 
-		for i := 0; i < len(gbytes); i = i + 4 {
-			img.Pix[i+0] = gbytes[i+2]
-			img.Pix[i+1] = gbytes[i+1]
-			img.Pix[i+2] = gbytes[i+0]
-			img.Pix[i+3] = gbytes[i+3]
+			for i := 0; i < len(gbytes); i = i + 4 {
+				img.Pix[i+0] = gbytes[i+2]
+				img.Pix[i+1] = gbytes[i+1]
+				img.Pix[i+2] = gbytes[i+0]
+				img.Pix[i+3] = gbytes[i+3]
+			}
+			robotgo.FreeBitmap(bitmapRef)
+
+			// Compress image for transporting
+			err := jpeg.Encode(tmp, img, &jpeg.EncoderOptions{Quality: 75})
+			if err != nil {
+				panic(err)
+			}
+
+			writeInt(writer, tmp.Len())
+			_, err = tmp.WriteTo(writer)
+
+			if err != nil {
+				panic(err)
+			}
 		}
-		robotgo.FreeBitmap(bitmapRef)
+	}()
 
-		// Compress image for transporting
-		start := time.Now()
-		err := jpeg.Encode(tmp, img, &jpeg.EncoderOptions{Quality: 75})
-		fmt.Print(time.Since(start))
-		if err != nil {
-			panic(err)
+	if reader != nil {
+		//go func() {
+		for {
+			b, err := reader.ReadBytes('\n')
+			if err != nil {
+				panic(err)
+			}
+
+			ev := hook.Event{}
+
+			err = json.Unmarshal(b, &ev)
+			if err != nil {
+				panic(err)
+			}
+
+			fmt.Println(ev)
 		}
-
-		fmt.Println("FrameSize send ", tmp.Len())
-		writeInt(writer, tmp.Len())
-		_, err = tmp.WriteTo(writer)
-
-		if err != nil {
-			panic(err)
-		}
+		//}()
 	}
 }
 
-func StartScreenReceiving(reader io.Reader) {
+func StartScreenReceiving(reader io.Reader, writer *bufio.Writer) {
 	var err error
 	width := readInt(reader)
 	height := readInt(reader)
 	tmp := make([]byte, width*height*4)
 	//width, height := robotgo.GetScreenSize()
-	app := app.New()
+	app := myapp.New()
 
 	win := app.NewWindow("Remote desktop")
-	win.Resize(fyne.Size{width, height})
+	win.Resize(myfyne.Size{width, height})
 
 	imgWidget := canvas.NewImageFromImage(image.NewRGBA(image.Rect(0, 0, width, height)))
 	win.SetContent(imgWidget)
@@ -218,26 +251,49 @@ func StartScreenReceiving(reader io.Reader) {
 
 			off := 0
 			for off < frameSize {
-				fmt.Println("FrameSize got ", frameSize)
 				n, err := reader.Read(tmp[off:frameSize])
 				if err != nil {
 					panic(err)
 				}
-				fmt.Println("Got n = ", n)
 				off += n
 			}
 
 			// Compress image for transporting
-			start := time.Now()
 			imgWidget.Image, err = jpeg.Decode(bytes.NewBuffer(tmp[:frameSize]), &jpeg.DecoderOptions{})
-			fmt.Println(time.Since(start))
-
 			if err != nil {
 				panic(err)
 			}
 
 			canvas.Refresh(imgWidget)
-			fmt.Println("Hello world")
+		}
+	}()
+
+	go func() {
+		EvChan := robotgo.Start()
+		defer robotgo.End()
+
+		for ev := range EvChan {
+			win.Canvas()
+			if win.Content() == nil {
+				continue
+			}
+
+			continue
+
+			b, err := json.Marshal(&ev)
+			if err != nil {
+				panic(err)
+			}
+
+			_, err = writer.Write(b)
+			if err != nil {
+				panic(err)
+			}
+
+			err = writer.WriteByte('\n')
+			if err != nil {
+				panic(err)
+			}
 		}
 	}()
 
