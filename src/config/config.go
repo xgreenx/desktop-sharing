@@ -1,4 +1,4 @@
-package desktop_sharing
+package config
 
 import (
 	maddr "github.com/multiformats/go-multiaddr"
@@ -41,4 +41,5 @@ type Config struct {
 	ListenAddresses  addrList
 	ScreenProtocolId string
 	PrivateKey       string
+	Hop              bool
 }
