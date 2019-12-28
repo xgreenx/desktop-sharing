@@ -23,8 +23,8 @@ func ScanInputCommands(node *sharingnode.SharingNode) {
 			fmt.Println(node.List())
 		case "screen":
 			id, err := peer.IDB58Decode(arg[1])
-			if err != nil {
-				fmt.Println("Got error during sharing ", err)
+			if err != nil || id == "" {
+				fmt.Println("Wrong id of node ", err)
 			}
 
 			err = node.ShareScreen(id)
@@ -39,9 +39,9 @@ func ScanInputCommands(node *sharingnode.SharingNode) {
 
 func main() {
 	log.SetAllLoggers(logging.WARNING)
-	log.SetLogLevel("node", "debug")
-	log.SetLogLevel("sharingnode", "debug")
-	log.SetLogLevel("autorelay", "debug")
+	log.SetLogLevel("node", "info")
+	log.SetLogLevel("sharingnode", "info")
+	log.SetLogLevel("autorelay", "info")
 	config, err := ParseFlags()
 	if err != nil {
 		panic(err)
@@ -51,6 +51,11 @@ func main() {
 	node := sharingnode.NewSharingNode(ctx, config)
 	node.BootStrap()
 
+	//if len(node.Config.BootstrapPeers) > 0 {
+	//	peerinfo, _ := peer.AddrInfoFromP2pAddr(node.Config.BootstrapPeers[0])
+	//	node.ShareScreen(peerinfo.ID)
+	//}
+	//
 	//select {}
 	ScanInputCommands(node)
 }
