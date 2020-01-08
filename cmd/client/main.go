@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"github.com/ipfs/go-log"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/whyrusleeping/go-logging"
+	"github.com/xgreenx/desktop-sharing/src/config"
 	"github.com/xgreenx/desktop-sharing/src/sharingnode"
 	"os"
 	"strings"
@@ -20,8 +20,12 @@ func ScanInputCommands(node *sharingnode.SharingNode) {
 
 		switch arg[0] {
 		case "list":
-			fmt.Println(node.List())
+			node.PrintList()
 		case "screen":
+			if len(arg) < 2 {
+				fmt.Println("Missed node ic")
+			}
+
 			id, err := peer.IDB58Decode(arg[1])
 			if err != nil || id == "" {
 				fmt.Println("Wrong id of node ", err)
@@ -38,17 +42,28 @@ func ScanInputCommands(node *sharingnode.SharingNode) {
 }
 
 func main() {
-	log.SetAllLoggers(logging.WARNING)
-	log.SetLogLevel("node", "info")
-	log.SetLogLevel("sharingnode", "info")
-	log.SetLogLevel("autorelay", "info")
-	config, err := ParseFlags()
+	conf := config.NewBootstrapConfig()
+
+	err := conf.ParseFlags()
 	if err != nil {
 		panic(err)
 	}
 
+	err = conf.LoadConfig()
+	if err != nil {
+		panic(err)
+	}
+
+	err = conf.Viper.WriteConfig()
+	if err != nil {
+		panic(err)
+	}
+	log.SetLogLevel("node", conf.LoggingLevel.String())
+	log.SetLogLevel("sharingnode", conf.LoggingLevel.String())
+	log.SetLogLevel("autorelay", conf.LoggingLevel.String())
+
 	ctx := context.Background()
-	node := sharingnode.NewSharingNode(ctx, config)
+	node := sharingnode.NewSharingNode(ctx, conf)
 	node.BootStrap()
 
 	//if len(node.Config.BootstrapPeers) > 0 {

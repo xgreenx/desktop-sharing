@@ -33,7 +33,7 @@ func StreamSend(streamContext context.Context, width, height int, screenShotChan
 		panic(err)
 	}
 
-	//context.SetBitRate(90000)
+	codecContext.SetBitRate(90000)
 	codecContext.SetWidth(width)
 	codecContext.SetHeight(height)
 	codecContext.SetTimeBase(avutil.NewRational(1, 10))

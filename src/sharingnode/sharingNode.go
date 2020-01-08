@@ -39,7 +39,7 @@ type SharingNode struct {
 	node.Node
 }
 
-func NewSharingNode(ctx context.Context, config *config.Config) *SharingNode {
+func NewSharingNode(ctx context.Context, config *config.BootstrapConfig) *SharingNode {
 	return &SharingNode{
 		node.Node{
 			ctx,
@@ -53,7 +53,14 @@ func NewSharingNode(ctx context.Context, config *config.Config) *SharingNode {
 func (n *SharingNode) BootStrap() {
 	n.Node.BootStrap()
 
-	n.Node.Host.SetStreamHandler(protocol.ID(n.Config.ScreenProtocolId), handleScreenStream)
+	for _, p := range n.Config.Protocols {
+		switch p {
+		case config.StreamID:
+			n.Node.Host.SetStreamHandler(protocol.ID(p), n.handleScreenStream)
+		default:
+			logger.Error("Unknown protocol", p)
+		}
+	}
 }
 
 func (n *SharingNode) ShareScreen(id peer.ID) error {
@@ -62,7 +69,7 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 	}
 
 	logger.Debug("Connecting to:", id)
-	stream, err := n.Host.NewStream(n.Context, id, protocol.ID(n.Config.ScreenProtocolId))
+	stream, err := n.Host.NewStream(n.Context, id, protocol.ID(config.StreamID))
 
 	// Let's try again via relay mechanism
 	if err != nil {
@@ -88,7 +95,7 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 			return err
 		}
 
-		stream, err = n.Host.NewStream(n.Context, id, protocol.ID(n.Config.ScreenProtocolId))
+		stream, err = n.Host.NewStream(n.Context, id, protocol.ID(config.StreamID))
 		if err != nil {
 			logger.Error(err)
 			return err
@@ -111,8 +118,14 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 	return nil
 }
 
-func handleScreenStream(stream network.Stream) {
+func (n *SharingNode) handleScreenStream(stream network.Stream) {
 	logger.Info("Got a new sharing connection!")
+
+	//peerInfo, err := peer.AddrInfoFromP2pAddr(stream.Conn().RemoteMultiaddr())
+	//if err != nil {
+	//	panic(err)
+	//}
+	//n.Host.Connect(n.Context, *peerInfo)
 	StartScreenSharing(stream)
 	err := stream.Close()
 	if err != nil {

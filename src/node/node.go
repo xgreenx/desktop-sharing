@@ -1,14 +1,12 @@
 package node
 
 import (
-	"bytes"
 	"context"
-	"encoding/hex"
+	"fmt"
 	"github.com/ipfs/go-log"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-autonat-svc"
 	"github.com/libp2p/go-libp2p-circuit"
-	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
@@ -17,6 +15,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"github.com/xgreenx/desktop-sharing/src/config"
 	"sync"
+	"time"
 )
 
 const NODES_TAG = "screen_sharing_nodes"
@@ -25,12 +24,12 @@ var logger = log.Logger("node")
 
 type Node struct {
 	Context context.Context
-	Config  *config.Config
+	Config  *config.BootstrapConfig
 	Dht     *dht.IpfsDHT
 	Host    host.Host
 }
 
-func NewNode(ctx context.Context, config *config.Config) *Node {
+func NewNode(ctx context.Context, config *config.BootstrapConfig) *Node {
 	return &Node{
 		ctx,
 		config,
@@ -41,16 +40,6 @@ func NewNode(ctx context.Context, config *config.Config) *Node {
 
 func (n *Node) BootStrap() {
 	var err error
-	b, err := hex.DecodeString(n.Config.PrivateKey)
-	if err != nil {
-		panic(err)
-	}
-
-	priv, _, err := crypto.GenerateEd25519Key(bytes.NewBuffer(b))
-	if err != nil {
-		panic(err)
-	}
-
 	relayOpt := make([]relay.RelayOpt, 0)
 
 	logger.Debug("Hop:", n.Config.Hop)
@@ -60,7 +49,7 @@ func (n *Node) BootStrap() {
 
 	n.Host, err = libp2p.New(n.Context,
 		libp2p.ListenAddrs([]multiaddr.Multiaddr(n.Config.ListenAddresses)...),
-		libp2p.Identity(priv),
+		libp2p.Identity(n.Config.PrivateKey),
 		libp2p.NATPortMap(),
 		libp2p.EnableRelay(relayOpt...),
 		libp2p.EnableAutoRelay(),
@@ -84,6 +73,21 @@ func (n *Node) BootStrap() {
 		panic(err)
 	}
 
+	n.connectBootstrap()
+
+	go func() {
+		for range time.Tick(time.Minute) {
+			n.connectBootstrap()
+		}
+	}()
+
+	logger.Info("Announcing ourselves...")
+	routingDiscovery := discovery.NewRoutingDiscovery(n.Dht)
+	discovery.Advertise(n.Context, routingDiscovery, NODES_TAG)
+	logger.Debug("Successfully announced!")
+}
+
+func (n *Node) connectBootstrap() {
 	var wg sync.WaitGroup
 	for _, peerAddr := range n.Config.BootstrapPeers {
 		peerinfo, err := peer.AddrInfoFromP2pAddr(peerAddr)
@@ -103,14 +107,9 @@ func (n *Node) BootStrap() {
 		}()
 	}
 	wg.Wait()
-
-	logger.Info("Announcing ourselves...")
-	routingDiscovery := discovery.NewRoutingDiscovery(n.Dht)
-	discovery.Advertise(n.Context, routingDiscovery, NODES_TAG)
-	logger.Debug("Successfully announced!")
 }
 
-func (n *Node) List() []peer.AddrInfo {
+func (n *Node) PrintList() {
 	logger.Debug("Searching for other peers...")
 	routingDiscovery := discovery.NewRoutingDiscovery(n.Dht)
 	peerChan, err := routingDiscovery.FindPeers(n.Context, NODES_TAG)
@@ -118,11 +117,9 @@ func (n *Node) List() []peer.AddrInfo {
 		panic(err)
 	}
 
-	result := make([]peer.AddrInfo, 0)
-
+	fmt.Println("Starting search")
 	for p := range peerChan {
-		result = append(result, p)
+		fmt.Println(p)
 	}
-
-	return result
+	fmt.Println("End search")
 }
