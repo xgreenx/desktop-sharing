@@ -15,7 +15,7 @@ import (
 	"os"
 )
 
-const StreamID = "/sharing/1.0.0"
+const StreamID = "/stream/1.0.0"
 const EventID = "/event/1.0.0"
 
 // A new type we need for writing a custom flag parser
@@ -65,7 +65,7 @@ func NewBootstrapConfig() *BootstrapConfig {
 
 	v.SetDefault("privateKey", randomHex(32))
 	v.SetDefault("hop", "false")
-	v.SetDefault("logging", logging.DEBUG.String())
+	v.SetDefault("logging", logging.ERROR.String())
 	v.SetDefault("protocols", []string{
 		StreamID,
 		EventID,

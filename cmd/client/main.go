@@ -24,16 +24,19 @@ func ScanInputCommands(node *sharingnode.SharingNode) {
 		case "screen":
 			if len(arg) < 2 {
 				fmt.Println("Missed node ic")
+				continue
 			}
 
 			id, err := peer.IDB58Decode(arg[1])
 			if err != nil || id == "" {
 				fmt.Println("Wrong id of node ", err)
+				continue
 			}
 
 			err = node.ShareScreen(id)
 			if err != nil {
 				fmt.Println("Got error during sharing ", err)
+				continue
 			}
 		default:
 			fmt.Println("Unknown command ", arg[0])

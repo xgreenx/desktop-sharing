@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"fyne.io/fyne"
 	"fyne.io/fyne/app"
 	"fyne.io/fyne/canvas"
@@ -21,8 +20,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
-	"github.com/libp2p/go-libp2p-swarm"
-	"github.com/multiformats/go-multiaddr"
 	"github.com/xgreenx/desktop-sharing/src/config"
 	"github.com/xgreenx/desktop-sharing/src/node"
 	"image"
@@ -41,12 +38,7 @@ type SharingNode struct {
 
 func NewSharingNode(ctx context.Context, config *config.BootstrapConfig) *SharingNode {
 	return &SharingNode{
-		node.Node{
-			ctx,
-			config,
-			nil,
-			nil,
-		},
+		*node.NewNode(ctx, config),
 	}
 }
 
@@ -57,6 +49,8 @@ func (n *SharingNode) BootStrap() {
 		switch p {
 		case config.StreamID:
 			n.Node.Host.SetStreamHandler(protocol.ID(p), n.handleScreenStream)
+		case config.EventID:
+			n.Node.Host.SetStreamHandler(protocol.ID(p), n.handleScreenEvent)
 		default:
 			logger.Error("Unknown protocol", p)
 		}
@@ -70,49 +64,29 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 
 	logger.Debug("Connecting to:", id)
 	stream, err := n.Host.NewStream(n.Context, id, protocol.ID(config.StreamID))
-
-	// Let's try again via relay mechanism
 	if err != nil {
-		// Creates a relay address
-		relayaddr, err := multiaddr.NewMultiaddr("/p2p-circuit/ipfs/" + id.Pretty())
-		if err != nil {
-			logger.Error(err)
-			return err
-		}
-
-		// Since we just tried and failed to dial, the dialer system will, by default
-		// prevent us from redialing again so quickly. Since we know what we're doing, we
-		// can use this ugly hack (it's on our TODO list to make it a little cleaner)
-		// to tell the dialer "no, its okay, let's try this again"
-		n.Host.Network().(*swarm.Swarm).Backoff().Clear(id)
-
-		h3relayInfo := peer.AddrInfo{
-			ID:    id,
-			Addrs: []multiaddr.Multiaddr{relayaddr},
-		}
-		if err := n.Host.Connect(context.Background(), h3relayInfo); err != nil {
-			logger.Error(err)
-			return err
-		}
-
-		stream, err = n.Host.NewStream(n.Context, id, protocol.ID(config.StreamID))
-		if err != nil {
-			logger.Error(err)
-			return err
-		}
+		logger.Error(err)
+		return err
+	}
+	event, err := n.Host.NewStream(n.Context, id, protocol.ID(config.EventID))
+	if err != nil {
+		logger.Error(err)
+		return err
 	}
 
-	StartScreenReceiving(stream)
+	StartRemoteDesktop(stream, event)
 	err = stream.Close()
+	if err != nil {
+		logger.Error(err)
+	}
+	err = event.Close()
 	if err != nil {
 		logger.Error(err)
 	}
 
 	defer func() {
-		fmt.Println("Write to heap start receiving")
-		f, _ := os.Create("heapR.out")
+		f, _ := os.Create("SharingHeap.out")
 		err = pprof.WriteHeapProfile(f)
-		fmt.Println("Write to heap end")
 	}()
 
 	return nil
@@ -126,17 +100,42 @@ func (n *SharingNode) handleScreenStream(stream network.Stream) {
 	//	panic(err)
 	//}
 	//n.Host.Connect(n.Context, *peerInfo)
-	StartScreenSharing(stream)
+
+	targetDisplay := 0
+	StartScreenSharing(stream, targetDisplay)
 	err := stream.Close()
 	if err != nil {
 		logger.Error(err)
 	}
 
 	defer func() {
-		fmt.Println("Write to heap start sharing")
-		f, _ := os.Create("heapS.out")
+		f, _ := os.Create("StreamHeapW.out")
 		err = pprof.WriteHeapProfile(f)
-		fmt.Println("Write to heap end")
+	}()
+}
+
+func (n *SharingNode) handleScreenEvent(stream network.Stream) {
+	logger.Info("Got a new event connection!")
+
+	targetDisplay := 0
+
+	num := screenshot.NumActiveDisplays()
+
+	offsetX := 0
+	for i := targetDisplay + 1; i < num; i++ {
+		offsetX = offsetX + screenshot.GetDisplayBounds(i).Dx()
+	}
+
+	receiver := NewEventReceiver(bufio.NewReader(stream), offsetX)
+	receiver.Run()
+	err := stream.Close()
+	if err != nil {
+		logger.Error(err)
+	}
+
+	defer func() {
+		f, _ := os.Create("EventHeapR.out")
+		err = pprof.WriteHeapProfile(f)
 	}()
 }
 
@@ -280,20 +279,10 @@ func GetScreenShots(streamContext context.Context, x, y, width, height int, ch c
 	}
 }
 
-func StartScreenSharing(writer network.Stream) {
+func StartScreenSharing(writer network.Stream, targetDisplay int) {
 	logger.Info("Start sharing screen")
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	reader := bufio.NewReader(writer)
-	targetDisplay := 0
-
-	n := screenshot.NumActiveDisplays()
-
-	offsetX := 0
-	for i := targetDisplay + 1; i < n; i++ {
-		offsetX = offsetX + screenshot.GetDisplayBounds(i).Dx()
-	}
 
 	bounds := screenshot.GetDisplayBounds(targetDisplay)
 	w := bounds.Dx()
@@ -308,9 +297,6 @@ func StartScreenSharing(writer network.Stream) {
 		logger.Error(err)
 		return
 	}
-
-	receiver := NewEventReceiver(reader, offsetX)
-	go receiver.Run()
 
 	screenShotChan := make(chan *screenShotTime)
 	go StreamSend(streamCtx, w, h, screenShotChan, func(data []byte) {
@@ -336,11 +322,10 @@ func StartScreenSharing(writer network.Stream) {
 	logger.Info("End sharing screen")
 }
 
-func StartScreenReceiving(stream network.Stream) {
+func StartRemoteDesktop(stream network.Stream, event network.Stream) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	writer := bufio.NewWriter(stream)
 	var err error
 	width, err := readInt(stream)
 	if err != nil {
@@ -361,7 +346,7 @@ func StartScreenReceiving(stream network.Stream) {
 	imgWidget := canvas.NewImageFromImage(image.NewYCbCr(image.Rect(0, 0, width, height), image.YCbCrSubsampleRatio444))
 	win.SetContent(imgWidget)
 
-	eventSender := NewEventSender(writer, width, height)
+	eventSender := NewEventSender(bufio.NewWriter(event), width, height)
 	eventSender.Subscribe(win)
 
 	var closeCallback glfw.CloseCallback
@@ -377,7 +362,10 @@ func StartScreenReceiving(stream network.Stream) {
 	onImage := func(img *image.YCbCr) {
 		myapp.Driver().RunOnMain(func() {
 			imgWidget.Image = img
-			win.Canvas().Refresh(imgWidget)
+			c := win.Canvas()
+			if c != nil {
+				c.Refresh(imgWidget)
+			}
 		})
 	}
 	go StreamReceive(streamCtx, width, height, senderChan, onImage)

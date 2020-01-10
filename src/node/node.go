@@ -12,8 +12,11 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/libp2p/go-libp2p-discovery"
 	"github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p-kad-dht/opts"
+	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/xgreenx/desktop-sharing/src/config"
+	"os"
 	"sync"
 	"time"
 )
@@ -23,10 +26,12 @@ const NODES_TAG = "screen_sharing_nodes"
 var logger = log.Logger("node")
 
 type Node struct {
-	Context context.Context
-	Config  *config.BootstrapConfig
-	Dht     *dht.IpfsDHT
-	Host    host.Host
+	Context     context.Context
+	Config      *config.BootstrapConfig
+	RoutingDht  *dht.IpfsDHT
+	DataDht     *dht.IpfsDHT
+	Host        host.Host
+	PingService *ping.PingService
 }
 
 func NewNode(ctx context.Context, config *config.BootstrapConfig) *Node {
@@ -35,7 +40,13 @@ func NewNode(ctx context.Context, config *config.BootstrapConfig) *Node {
 		config,
 		nil,
 		nil,
+		nil,
+		nil,
 	}
+}
+
+func nameKey(ID peer.ID) string {
+	return fmt.Sprintf("/%s/name", ID.String())
 }
 
 func (n *Node) BootStrap() {
@@ -54,22 +65,31 @@ func (n *Node) BootStrap() {
 		libp2p.EnableRelay(relayOpt...),
 		libp2p.EnableAutoRelay(),
 		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
-			n.Dht, err = dht.New(n.Context, h)
-			return n.Dht, err
+			n.RoutingDht, err = dht.New(n.Context, h)
+			return n.RoutingDht, err
 		}),
 	)
 	if err != nil {
 		panic(err)
 	}
-	logger.Info("Host created. We are:", n.Host.ID())
+	fmt.Println("Host created. We are:", n.Host.ID())
 	logger.Info(n.Host.Addrs())
 
 	if n.Config.Hop {
 		_, err = autonat.NewAutoNATService(n.Context, n.Host)
 	}
 
+	n.PingService = ping.NewPingService(n.Host)
+	n.DataDht, err = dht.New(n.Context, n.Host, dhtopts.Validator(NullValidator{}))
+	if err != nil {
+		panic(err)
+	}
+
 	logger.Debug("Bootstrapping the DHT")
-	if err = n.Dht.Bootstrap(n.Context); err != nil {
+	if err = n.RoutingDht.Bootstrap(n.Context); err != nil {
+		panic(err)
+	}
+	if err = n.DataDht.Bootstrap(n.Context); err != nil {
 		panic(err)
 	}
 
@@ -82,8 +102,16 @@ func (n *Node) BootStrap() {
 	}()
 
 	logger.Info("Announcing ourselves...")
-	routingDiscovery := discovery.NewRoutingDiscovery(n.Dht)
+	routingDiscovery := discovery.NewRoutingDiscovery(n.RoutingDht)
 	discovery.Advertise(n.Context, routingDiscovery, NODES_TAG)
+	name, err := os.Hostname()
+	if err != nil {
+		panic(err)
+	}
+	err = n.DataDht.PutValue(n.Context, nameKey(n.Host.ID()), []byte(name), dht.Quorum(1))
+	if err != nil {
+		panic(err)
+	}
 	logger.Debug("Successfully announced!")
 }
 
@@ -111,7 +139,7 @@ func (n *Node) connectBootstrap() {
 
 func (n *Node) PrintList() {
 	logger.Debug("Searching for other peers...")
-	routingDiscovery := discovery.NewRoutingDiscovery(n.Dht)
+	routingDiscovery := discovery.NewRoutingDiscovery(n.RoutingDht)
 	peerChan, err := routingDiscovery.FindPeers(n.Context, NODES_TAG)
 	if err != nil {
 		panic(err)
@@ -119,7 +147,16 @@ func (n *Node) PrintList() {
 
 	fmt.Println("Starting search")
 	for p := range peerChan {
-		fmt.Println(p)
+		name, err := n.DataDht.GetValue(n.Context, nameKey(p.ID), dht.Quorum(1))
+		if err != nil {
+			logger.Warning(err)
+		}
+
+		childCtx, cancel := context.WithCancel(n.Context)
+		latency := <-n.PingService.Ping(childCtx, p.ID)
+		cancel()
+
+		fmt.Printf("Id: %s, status: %s, name: %s\n", p.ID, latency, name)
 	}
 	fmt.Println("End search")
 }
