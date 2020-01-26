@@ -21,7 +21,9 @@ func main() {
 		panic(err)
 	}
 
-	err = conf.Viper.WriteConfig()
+	conf.UpdateDefaults()
+
+	err = conf.WriteConfig()
 	if err != nil {
 		panic(err)
 	}

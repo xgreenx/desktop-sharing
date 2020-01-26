@@ -8,7 +8,9 @@ import (
 	"github.com/libp2p/go-libp2p-autonat-svc"
 	"github.com/libp2p/go-libp2p-circuit"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/libp2p/go-libp2p-discovery"
 	"github.com/libp2p/go-libp2p-kad-dht"
@@ -113,6 +115,17 @@ func (n *Node) BootStrap() {
 		logger.Error(err)
 	}
 	logger.Debug("Successfully announced!")
+
+	for _, p := range n.Config.Protocols {
+		switch p {
+		case config.CommandID:
+			n.Host.SetStreamHandler(protocol.ID(p), n.handleCommandStream)
+		}
+	}
+}
+
+func (n *Node) handleCommandStream(network.Stream) {
+	// TODO:
 }
 
 func (n *Node) connectBootstrap() {

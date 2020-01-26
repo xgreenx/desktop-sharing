@@ -26,12 +26,14 @@ import (
 var logger = log.Logger("sharingnode")
 
 type SharingNode struct {
-	node.Node
+	*node.Node
+	*config.SharingOptions
 }
 
-func NewSharingNode(ctx context.Context, config *config.BootstrapConfig) *SharingNode {
+func NewSharingNode(ctx context.Context, config *config.SharingConfig) *SharingNode {
 	return &SharingNode{
-		*node.NewNode(ctx, config),
+		node.NewNode(ctx, config.BootstrapConfig),
+		config.SharingOptions,
 	}
 }
 
@@ -44,8 +46,6 @@ func (n *SharingNode) BootStrap() {
 			n.Node.Host.SetStreamHandler(protocol.ID(p), n.handleScreenStream)
 		case config.EventID:
 			n.Node.Host.SetStreamHandler(protocol.ID(p), n.handleScreenEvent)
-		default:
-			logger.Error("Unknown protocol", p)
 		}
 	}
 }

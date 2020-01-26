@@ -45,7 +45,7 @@ func ScanInputCommands(node *sharingnode.SharingNode) {
 }
 
 func main() {
-	conf := config.NewBootstrapConfig()
+	conf := config.NewSharingConfig(config.NewBootstrapConfig())
 
 	err := conf.ParseFlags()
 	if err != nil {
@@ -57,7 +57,9 @@ func main() {
 		panic(err)
 	}
 
-	err = conf.Viper.WriteConfig()
+	conf.UpdateDefaults()
+
+	err = conf.WriteConfig()
 	if err != nil {
 		panic(err)
 	}
