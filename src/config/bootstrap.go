@@ -74,7 +74,7 @@ func NewBootstrapConfig() *BootstrapConfig {
 		"/ip4/0.0.0.0/tcp/1488",
 	})
 	v.SetDefault("bootstrap", []string{
-		"/ip4/193.178.51.87/tcp/9999/p2p/12D3KooWRTWbcASrx4dWei5jD1FXuVzy7VtdUydCzDohAHJbT7Wa",
+		"/ip4/194.9.70.102/tcp/1488/p2p/12D3KooWGA2HXdU4Lx81ak8XcToTKpRTGp4ghxiQsjdvAH2jarUe",
 	})
 
 	return &BootstrapConfig{

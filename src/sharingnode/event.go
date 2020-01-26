@@ -83,6 +83,7 @@ func (e *EventSender) sendEvent(ev *Event) {
 			b, err := json.Marshal(temp)
 			if err != nil {
 				logger.Error(err)
+				return
 			}
 
 			b = append(b, '\n')
@@ -90,11 +91,13 @@ func (e *EventSender) sendEvent(ev *Event) {
 			_, err = e.writer.Write(b)
 			if err != nil {
 				logger.Error(err)
+				return
 			}
 
 			err = e.writer.Flush()
 			if err != nil {
 				logger.Error(err)
+				return
 			}
 		}()
 	}
@@ -212,11 +215,14 @@ func (e *EventReceiver) receiveEvent() (events, error) {
 }
 
 func (e *EventReceiver) Run() {
+	robotgo.SetMouseDelay(0)
+	robotgo.SetKeyboardDelay(0)
+	robotgo.SetKeyDelay(0)
 	for {
 		evs, err := e.receiveEvent()
 		if err != nil {
 			logger.Error(err)
-			break
+			return
 		}
 
 		now := time.Now()
@@ -229,7 +235,7 @@ func (e *EventReceiver) Run() {
 			case MouseUp:
 				robotgo.MouseToggle("up", MouseMap[ev.Button])
 			case MouseDrag:
-				robotgo.DragMouse(int(ev.X), int(ev.Y), MouseMap[ev.Button])
+				robotgo.MoveMouse(int(ev.X), int(ev.Y))
 			case Scroll:
 				direction := "up"
 				if ev.Yoff < 0 {
@@ -243,8 +249,6 @@ func (e *EventReceiver) Run() {
 				key := KeyToString[ev.Key]
 				robotgo.KeyToggle(key, "up")
 			case KeyRepeat:
-				key := KeyToString[ev.Key]
-				robotgo.KeyTap(key)
 			default:
 				continue
 			}

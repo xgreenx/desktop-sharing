@@ -1,16 +1,20 @@
 package sharingnode
 
 // #include <stdlib.h>
+// #include <stdint.h>
 import "C"
 import (
 	"context"
+	"fmt"
 	"github.com/imkira/go-libav/avcodec"
+	"github.com/imkira/go-libav/avformat"
 	"github.com/imkira/go-libav/avutil"
+	"github.com/imkira/go-libav/swscale"
 	"github.com/pkg/errors"
 	"image"
 )
 
-func StreamSend(streamContext context.Context, width, height int, screenShotChan chan *screenShotTime, onData func([]byte)) {
+func StreamSend(streamContext context.Context, width, height int, dataCh chan []byte) {
 	//avutil.SetLogLevel(avutil.LogLevelTrace)
 
 	codec := avcodec.FindEncoderByName("libx264")
@@ -21,14 +25,13 @@ func StreamSend(streamContext context.Context, width, height int, screenShotChan
 	if err != nil {
 		panic(err)
 	}
-	//context.SetCodecType(avutil.MediaTypeVideo)
 
-	frame, err := avutil.NewFrame()
+	encFrame, err := avutil.NewFrame()
 	if err != nil {
 		panic(err)
 	}
 
-	packet, err := avcodec.NewPacket()
+	encPacket, err := avcodec.NewPacket()
 	if err != nil {
 		panic(err)
 	}
@@ -38,9 +41,8 @@ func StreamSend(streamContext context.Context, width, height int, screenShotChan
 	codecContext.SetHeight(height)
 	codecContext.SetTimeBase(avutil.NewRational(1, 10))
 	codecContext.SetFrameRate(avutil.NewRational(10, 1))
-	//context.SetGOPSize(12)
 	codecContext.SetMaxBFrames(0)
-	codecContext.SetPixelFormat(avutil.PIX_FMT_YUV444P)
+	codecContext.SetPixelFormat(avutil.PIX_FMT_YUV420P)
 
 	options := avutil.NewDictionary()
 	err = options.Set("preset", "ultrafast")
@@ -88,53 +90,147 @@ func StreamSend(streamContext context.Context, width, height int, screenShotChan
 		panic(err)
 	}
 
-	frame.SetWidth(codecContext.Width())
-	frame.SetHeight(codecContext.Height())
-	frame.SetPixelFormat(codecContext.PixelFormat())
+	encFrame.SetWidth(codecContext.Width())
+	encFrame.SetHeight(codecContext.Height())
+	encFrame.SetPixelFormat(codecContext.PixelFormat())
 
-	err = frame.GetBuffer()
+	err = encFrame.GetBuffer()
 	if err != nil {
 		panic(err)
 	}
 
-	defer frame.Free()
-	defer packet.Free()
+	swsContext, err := swscale.NewContext(
+		&swscale.DataDescription{width, height, avutil.PIX_FMT_RGBA},
+		&swscale.DataDescription{width, height, avutil.PIX_FMT_YUV420P},
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	pAVFormatContext, err := avformat.NewContextForInput()
+	if err != nil {
+		panic(err)
+	}
+
+	// TODO: support macOS and window
+	pAVInputFormat := avformat.FindInputByShortName("x11grab")
+	if pAVInputFormat == nil {
+		panic(errors.New("pAVInputFormat is nil"))
+	}
+
+	optionsScreen := avutil.NewDictionary()
+	err = optionsScreen.Set("preset", "ultrafast")
+	if err != nil {
+		panic(err)
+	}
+	err = optionsScreen.Set("draw_mouse", "0")
+	if err != nil {
+		panic(err)
+	}
+	err = optionsScreen.Set("video_size", fmt.Sprintf("%dx%d", width, height))
+	if err != nil {
+		panic(err)
+	}
+	err = optionsScreen.Set("r", "10")
+	if err != nil {
+		panic(err)
+	}
+
+	err = pAVFormatContext.OpenInput(":0.0+0,0", pAVInputFormat, optionsScreen)
+	if err != nil {
+		panic(err)
+	}
+
+	err = pAVFormatContext.FindStreamInfo([]*avutil.Dictionary{optionsScreen})
+	if err != nil {
+		panic(err)
+	}
+
+	var pAVCodecContext *avcodec.Context
+
+	for _, s := range pAVFormatContext.Streams() {
+		pAVCodecContext = s.CodecContext()
+		if pAVCodecContext.CodecType() == avutil.MediaTypeVideo {
+			break
+		}
+	}
+
+	pAVCodec := avcodec.FindDecoderByID(pAVCodecContext.CodecID())
+	if pAVCodec == nil {
+		panic(errors.New("pAVCodec is nil"))
+	}
+
+	err = pAVCodecContext.OpenWithCodec(pAVCodec, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	decPacket, err := avcodec.NewPacket()
+	if err != nil {
+		panic(err)
+	}
+
+	defer encFrame.Free()
+	defer encPacket.Free()
+	defer swsContext.Free()
 	defer codecContext.Free()
+	defer pAVFormatContext.Free()
+	defer pAVFormatContext.CloseInput()
+	defer options.Free()
+	defer optionsScreen.Free()
+	defer close(dataCh)
 
 	index := 0
 	for {
-		sc, ok := <-screenShotChan
-		if !ok {
+		select {
+		case <-streamContext.Done():
 			return
-		}
+		default:
+			//now := time.Now()
+			frameDone, err := pAVFormatContext.ReadFrame(decPacket)
+			if err != nil {
+				logger.Error(err)
+				return
+			}
 
-		img := sc.image
-		err = frame.MakeWritable()
-		if err != nil {
-			panic(err)
-		}
+			if !frameDone {
+				return
+			}
 
-		frame.SetData(0, img.Y)
-		frame.SetData(1, img.Cb)
-		frame.SetData(2, img.Cr)
-		frame.SetPTS(int64(index))
-		index++
+			_, err = pAVCodecContext.DecodeVideo(decPacket, func(decFrame *avutil.Frame) {
+				err = encFrame.MakeWritable()
+				if err != nil {
+					panic(err)
+				}
 
-		_, err = codecContext.EncodeVideo(packet, frame, func(data []byte) {
-			cData := make([]byte, len(data))
-			copy(cData, data)
-			onData(cData)
-		})
-		if err != nil {
-			panic(err)
+				swsContext.Scale(decFrame, 0, height, encFrame)
+				encFrame.SetPTS(int64(index))
+				index++
+
+				encPacket.SetData(nil)
+				encPacket.SetSize(0)
+
+				_, err = codecContext.EncodeVideo(encPacket, encFrame, func(data []byte) {
+					cData := make([]byte, len(data))
+					copy(cData, data)
+					dataCh <- cData
+				})
+				if err != nil {
+					panic(err)
+				}
+				decFrame.FreeData(0)
+			})
+
+			if err != nil {
+				logger.Error(err)
+				return
+			}
+			//logger.Debug(time.Now().Sub(now))
 		}
-		frame.FreeData(0)
-		frame.FreeData(1)
-		frame.FreeData(2)
 	}
 }
 
-func StreamReceive(streamCtx context.Context, width, height int, senderCh chan *dataTime, onImage func(img *image.YCbCr)) {
+func StreamReceive(streamCtx context.Context, width, height int, senderCh chan []byte, onImage func(img *image.YCbCr)) {
 	//avutil.SetLogLevel(avutil.LogLevelDebug)
 
 	codec := avcodec.FindDecoderByName("h264")
@@ -165,8 +261,8 @@ func StreamReceive(streamCtx context.Context, width, height int, senderCh chan *
 	defer codecContext.Free()
 
 	ySize := width * height
-	cdSize := width * height
-	crSize := width * height
+	cdSize := width * height / 4
+	crSize := width * height / 4
 
 	needParse := true
 	for {
@@ -175,7 +271,7 @@ func StreamReceive(streamCtx context.Context, width, height int, senderCh chan *
 			return
 		}
 
-		data := receipt.data
+		data := receipt
 		dataSize := len(data)
 
 		for dataSize > 0 {
@@ -201,11 +297,15 @@ func StreamReceive(streamCtx context.Context, width, height int, senderCh chan *
 				yData := C.GoBytes(f.Data(0), C.int(ySize))
 				cbData := C.GoBytes(f.Data(1), C.int(cdSize))
 				crData := C.GoBytes(f.Data(2), C.int(crSize))
-				img := image.NewYCbCr(image.Rect(0, 0, width, height), image.YCbCrSubsampleRatio444)
+				img := image.NewYCbCr(image.Rect(0, 0, width, height), image.YCbCrSubsampleRatio420)
 				for i := 0; i < ySize; i++ {
 					img.Y[i] = yData[i]
-					img.Cb[i] = cbData[i]
-					img.Cr[i] = crData[i]
+					if i < cdSize {
+						img.Cb[i] = cbData[i]
+					}
+					if i < crSize {
+						img.Cr[i] = crData[i]
+					}
 				}
 
 				onImage(img)

@@ -9,11 +9,6 @@ import (
 	"fyne.io/fyne"
 	"fyne.io/fyne/app"
 	"fyne.io/fyne/canvas"
-	"github.com/BurntSushi/xgb"
-	mshm "github.com/BurntSushi/xgb/shm"
-	"github.com/BurntSushi/xgb/xinerama"
-	"github.com/BurntSushi/xgb/xproto"
-	"github.com/gen2brain/shm"
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"github.com/ipfs/go-log"
 	"github.com/kbinani/screenshot"
@@ -23,11 +18,9 @@ import (
 	"github.com/xgreenx/desktop-sharing/src/config"
 	"github.com/xgreenx/desktop-sharing/src/node"
 	"image"
-	"image/color"
 	"io"
 	"os"
 	"runtime/pprof"
-	"time"
 )
 
 var logger = log.Logger("sharingnode")
@@ -95,6 +88,11 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 func (n *SharingNode) handleScreenStream(stream network.Stream) {
 	logger.Info("Got a new sharing connection!")
 
+	defer func() {
+		f, _ := os.Create("StreamHeapW.out")
+		pprof.WriteHeapProfile(f)
+	}()
+
 	//peerInfo, err := peer.AddrInfoFromP2pAddr(stream.Conn().RemoteMultiaddr())
 	//if err != nil {
 	//	panic(err)
@@ -107,15 +105,15 @@ func (n *SharingNode) handleScreenStream(stream network.Stream) {
 	if err != nil {
 		logger.Error(err)
 	}
-
-	defer func() {
-		f, _ := os.Create("StreamHeapW.out")
-		err = pprof.WriteHeapProfile(f)
-	}()
 }
 
 func (n *SharingNode) handleScreenEvent(stream network.Stream) {
 	logger.Info("Got a new event connection!")
+
+	defer func() {
+		f, _ := os.Create("EventHeapR.out")
+		pprof.WriteHeapProfile(f)
+	}()
 
 	targetDisplay := 0
 
@@ -132,11 +130,6 @@ func (n *SharingNode) handleScreenEvent(stream network.Stream) {
 	if err != nil {
 		logger.Error(err)
 	}
-
-	defer func() {
-		f, _ := os.Create("EventHeapR.out")
-		err = pprof.WriteHeapProfile(f)
-	}()
 }
 
 func writeInt(writer io.Writer, val int) error {
@@ -159,126 +152,6 @@ func readInt(reader io.Reader) (int, error) {
 	return int(binary.LittleEndian.Uint64(b)), nil
 }
 
-type screenShotTime struct {
-	image *image.YCbCr
-	time  time.Time
-}
-
-type dataTime struct {
-	data []byte
-	time time.Time
-}
-
-func GetScreenShots(streamContext context.Context, x, y, width, height int, ch chan *screenShotTime) error {
-	c, err := xgb.NewConn()
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	err = xinerama.Init(c)
-	if err != nil {
-		return err
-	}
-
-	reply, err := xinerama.QueryScreens(c).Reply()
-	if err != nil {
-		return err
-	}
-
-	primary := reply.ScreenInfo[0]
-	x0 := int(primary.XOrg)
-	y0 := int(primary.YOrg)
-
-	useShm := true
-	err = mshm.Init(c)
-	if err != nil {
-		useShm = false
-	}
-
-	screen := xproto.Setup(c).DefaultScreen(c)
-	wholeScreenBounds := image.Rect(0, 0, int(screen.WidthInPixels), int(screen.HeightInPixels))
-	targetBounds := image.Rect(x+x0, y+y0, x+x0+width, y+y0+height)
-	intersect := wholeScreenBounds.Intersect(targetBounds)
-	defer close(ch)
-	for {
-		select {
-		case <-streamContext.Done():
-			logger.Info("Stream context done")
-			return nil
-		default:
-			err = func() error {
-				var data []byte
-
-				if useShm {
-					shmSize := intersect.Dx() * intersect.Dy() * 4
-					shmId, err := shm.Get(shm.IPC_PRIVATE, shmSize, shm.IPC_CREAT|0777)
-					if err != nil {
-						return err
-					}
-
-					seg, err := mshm.NewSegId(c)
-					if err != nil {
-						return err
-					}
-
-					data, err = shm.At(shmId, 0, 0)
-					if err != nil {
-						return err
-					}
-
-					mshm.Attach(c, seg, uint32(shmId), false)
-
-					defer mshm.Detach(c, seg)
-					defer shm.Rm(shmId)
-					defer shm.Dt(data)
-
-					_, err = mshm.GetImage(c, xproto.Drawable(screen.Root),
-						int16(intersect.Min.X), int16(intersect.Min.Y),
-						uint16(intersect.Dx()), uint16(intersect.Dy()), 0xffffffff,
-						byte(xproto.ImageFormatZPixmap), seg, 0).Reply()
-					if err != nil {
-						return err
-					}
-				} else {
-					xImg, err := xproto.GetImage(c, xproto.ImageFormatZPixmap, xproto.Drawable(screen.Root),
-						int16(intersect.Min.X), int16(intersect.Min.Y),
-						uint16(intersect.Dx()), uint16(intersect.Dy()), 0xffffffff).Reply()
-					if err != nil {
-						return err
-					}
-
-					data = xImg.Data
-				}
-
-				// BitBlt by hand
-
-				img := image.NewYCbCr(image.Rect(0, 0, width, height), image.YCbCrSubsampleRatio444)
-				offset := 0
-				for i := 0; i < width*height; i++ {
-					r := data[offset+2]
-					g := data[offset+1]
-					b := data[offset]
-					y, Cb, Cr := color.RGBToYCbCr(r, g, b)
-					img.Y[i] = y
-					img.Cb[i] = Cb
-					img.Cr[i] = Cr
-					offset += 4
-				}
-
-				sc := screenShotTime{img, time.Now()}
-
-				ch <- &sc
-				return nil
-			}()
-			if err != nil {
-				logger.Error(err)
-				return err
-			}
-		}
-	}
-}
-
 func StartScreenSharing(writer network.Stream, targetDisplay int) {
 	logger.Info("Start sharing screen")
 	streamCtx, cancel := context.WithCancel(context.Background())
@@ -298,27 +171,22 @@ func StartScreenSharing(writer network.Stream, targetDisplay int) {
 		return
 	}
 
-	screenShotChan := make(chan *screenShotTime)
-	go StreamSend(streamCtx, w, h, screenShotChan, func(data []byte) {
-		err := writeInt(writer, len(data))
-		if err != nil {
-			logger.Error(err)
-			cancel()
-			return
-		}
+	dataCh := make(chan []byte, 4)
+	go func() {
+		var err error
+		defer cancel()
+		defer logger.Error(err)
+		for data := range dataCh {
+			b := make([]byte, 8)
+			binary.LittleEndian.PutUint64(b, uint64(len(data)))
 
-		_, err = writer.Write(data)
-
-		if err != nil {
-			logger.Error(err)
-			cancel()
-			return
+			_, err = writer.Write(append(b, data...))
+			if err != nil {
+				return
+			}
 		}
-	})
-	err = GetScreenShots(streamCtx, bounds.Min.X, bounds.Min.Y, w, h, screenShotChan)
-	if err != nil {
-		logger.Error(err)
-	}
+	}()
+	StreamSend(streamCtx, w, h, dataCh)
 	logger.Info("End sharing screen")
 }
 
@@ -343,7 +211,7 @@ func StartRemoteDesktop(stream network.Stream, event network.Stream) {
 	win := myapp.NewWindow("Desktop Sharing")
 	win.Resize(fyne.Size{width, height})
 
-	imgWidget := canvas.NewImageFromImage(image.NewYCbCr(image.Rect(0, 0, width, height), image.YCbCrSubsampleRatio444))
+	imgWidget := canvas.NewImageFromImage(image.NewYCbCr(image.Rect(0, 0, width, height), image.YCbCrSubsampleRatio420))
 	win.SetContent(imgWidget)
 
 	eventSender := NewEventSender(bufio.NewWriter(event), width, height)
@@ -358,15 +226,13 @@ func StartRemoteDesktop(stream network.Stream, event network.Stream) {
 		closeCallback(w)
 	})
 
-	senderChan := make(chan *dataTime)
+	senderChan := make(chan []byte)
 	onImage := func(img *image.YCbCr) {
-		myapp.Driver().RunOnMain(func() {
-			imgWidget.Image = img
-			c := win.Canvas()
-			if c != nil {
-				c.Refresh(imgWidget)
-			}
-		})
+		imgWidget.Image = img
+		c := win.Canvas()
+		if c != nil {
+			c.Refresh(imgWidget)
+		}
 	}
 	go StreamReceive(streamCtx, width, height, senderChan, onImage)
 
@@ -394,7 +260,7 @@ func StartRemoteDesktop(stream network.Stream, event network.Stream) {
 
 			data := make([]byte, frameSize)
 			copy(data, tmp[:frameSize])
-			senderChan <- &dataTime{data, time.Now()}
+			senderChan <- data
 		}
 	}()
 

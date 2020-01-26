@@ -110,7 +110,7 @@ func (n *Node) BootStrap() {
 	}
 	err = n.DataDht.PutValue(n.Context, nameKey(n.Host.ID()), []byte(name), dht.Quorum(1))
 	if err != nil {
-		panic(err)
+		logger.Error(err)
 	}
 	logger.Debug("Successfully announced!")
 }
@@ -142,7 +142,7 @@ func (n *Node) PrintList() {
 	routingDiscovery := discovery.NewRoutingDiscovery(n.RoutingDht)
 	peerChan, err := routingDiscovery.FindPeers(n.Context, NODES_TAG)
 	if err != nil {
-		panic(err)
+		logger.Error(err)
 	}
 
 	fmt.Println("Starting search")
