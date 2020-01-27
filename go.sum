@@ -521,6 +521,10 @@ github.com/whyrusleeping/multiaddr-filter v0.0.0-20160516205228-e903e4adabd7/go.
 github.com/x-cray/logrus-prefixed-formatter v0.5.2/go.mod h1:2duySbKsL6M18s5GU7VPsoEPHyzalCE06qoARUCeBBE=
 github.com/xgreenx/fyne v1.1.3-0.20191228134522-4969471d1723 h1:Q9z5Fi7OgATKHy063SGvC729fsbddwJEYj8m/2t7OwU=
 github.com/xgreenx/fyne v1.1.3-0.20191228134522-4969471d1723/go.mod h1:ukZVsvlHO29NK4HARH2B4rqgVqgx6WbtWKfEUOz4ZNo=
+github.com/xgreenx/fyne v1.1.3-0.20200126214305-fc694013b123 h1:JEvGHDgsS+OiH5kZE7VSDBEauXC/IP17JoQZQOT4DWA=
+github.com/xgreenx/fyne v1.1.3-0.20200126214305-fc694013b123/go.mod h1:qt0vKzKwEy0Ev6V9HTFKNAhsUrHq602vzl07//1lCUE=
+github.com/xgreenx/fyne v1.1.3-0.20200126220221-61be546849e8 h1:QTAEzN8oj93zG0Tsx9E0410PtUaSs09MlZpaAwrmrKk=
+github.com/xgreenx/fyne v1.1.3-0.20200126220221-61be546849e8/go.mod h1:qt0vKzKwEy0Ev6V9HTFKNAhsUrHq602vzl07//1lCUE=
 github.com/xgreenx/go-libav v0.0.0-20200126120735-7fad8d896b03 h1:hs3qbPODl0IPv0i5jusO4gub45GGiU44wQCtE0wEPCw=
 github.com/xgreenx/go-libav v0.0.0-20200126120735-7fad8d896b03/go.mod h1:GcxWh3kP4g1iiSShgVt5clGsPiAluo/F4mSdcu5KuSM=
 github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2/go.mod h1:UETIi67q53MR2AWcXfiuqkDkRtnGDLqkBTpCHuJHxtU=

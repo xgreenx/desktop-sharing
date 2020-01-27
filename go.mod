@@ -3,7 +3,7 @@ module github.com/xgreenx/desktop-sharing
 go 1.13
 
 replace (
-	fyne.io/fyne => github.com/xgreenx/fyne v1.1.3-0.20191228134522-4969471d1723
+	fyne.io/fyne => github.com/xgreenx/fyne v1.1.3-0.20200126220221-61be546849e8
 	github.com/imkira/go-libav => github.com/xgreenx/go-libav v0.0.0-20200126120735-7fad8d896b03
 )
 

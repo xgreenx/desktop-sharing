@@ -31,8 +31,9 @@ type SharingNode struct {
 }
 
 func NewSharingNode(ctx context.Context, config *config.SharingConfig) *SharingNode {
+	n := node.NewNode(ctx, config.BootstrapConfig)
 	return &SharingNode{
-		node.NewNode(ctx, config.BootstrapConfig),
+		n,
 		config.SharingOptions,
 	}
 }
@@ -48,6 +49,7 @@ func (n *SharingNode) BootStrap() {
 			n.Node.Host.SetStreamHandler(protocol.ID(p), n.handleScreenEvent)
 		}
 	}
+	n.AccessVerifier = node.NewAccessVerifier(n.AccessStore, NewGUIAllower(n.Config), n.Host, n.Context, n.DataDht)
 }
 
 func (n *SharingNode) ShareScreen(id peer.ID) error {
@@ -56,12 +58,12 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 	}
 
 	logger.Debug("Connecting to:", id)
-	stream, err := n.Host.NewStream(n.Context, id, protocol.ID(config.StreamID))
+	stream, err := n.AccessVerifier.Access(id, protocol.ID(config.StreamID))
 	if err != nil {
 		logger.Error(err)
 		return err
 	}
-	event, err := n.Host.NewStream(n.Context, id, protocol.ID(config.EventID))
+	event, err := n.AccessVerifier.Access(id, protocol.ID(config.EventID))
 	if err != nil {
 		logger.Error(err)
 		return err
@@ -87,11 +89,25 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 
 func (n *SharingNode) handleScreenStream(stream network.Stream) {
 	logger.Info("Got a new sharing connection!")
+	defer func() {
+		err := stream.Close()
+		if err != nil {
+			logger.Error(err)
+		}
+	}()
 
 	defer func() {
 		f, _ := os.Create("StreamHeapW.out")
 		pprof.WriteHeapProfile(f)
 	}()
+
+	result, err := n.AccessVerifier.Verify(stream)
+	if err != nil {
+		logger.Warning(err)
+	}
+	if !result {
+		return
+	}
 
 	//peerInfo, err := peer.AddrInfoFromP2pAddr(stream.Conn().RemoteMultiaddr())
 	//if err != nil {
@@ -101,19 +117,29 @@ func (n *SharingNode) handleScreenStream(stream network.Stream) {
 
 	targetDisplay := 0
 	StartScreenSharing(stream, targetDisplay)
-	err := stream.Close()
-	if err != nil {
-		logger.Error(err)
-	}
 }
 
 func (n *SharingNode) handleScreenEvent(stream network.Stream) {
 	logger.Info("Got a new event connection!")
+	defer func() {
+		err := stream.Close()
+		if err != nil {
+			logger.Error(err)
+		}
+	}()
 
 	defer func() {
 		f, _ := os.Create("EventHeapR.out")
 		pprof.WriteHeapProfile(f)
 	}()
+
+	result, err := n.AccessVerifier.Verify(stream)
+	if err != nil {
+		logger.Warning(err)
+	}
+	if !result {
+		return
+	}
 
 	targetDisplay := 0
 
@@ -126,10 +152,6 @@ func (n *SharingNode) handleScreenEvent(stream network.Stream) {
 
 	receiver := NewEventReceiver(bufio.NewReader(stream), offsetX)
 	receiver.Run()
-	err := stream.Close()
-	if err != nil {
-		logger.Error(err)
-	}
 }
 
 func writeInt(writer io.Writer, val int) error {

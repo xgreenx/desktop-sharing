@@ -28,18 +28,22 @@ const NODES_TAG = "screen_sharing_nodes"
 var logger = log.Logger("node")
 
 type Node struct {
-	Context     context.Context
-	Config      *config.BootstrapConfig
-	RoutingDht  *dht.IpfsDHT
-	DataDht     *dht.IpfsDHT
-	Host        host.Host
-	PingService *ping.PingService
+	Context        context.Context
+	Config         *config.BootstrapConfig
+	RoutingDht     *dht.IpfsDHT
+	DataDht        *dht.IpfsDHT
+	Host           host.Host
+	AccessVerifier *AccessVerifier
+	AccessStore    *AccessStore
+	PingService    *ping.PingService
 }
 
 func NewNode(ctx context.Context, config *config.BootstrapConfig) *Node {
 	return &Node{
 		ctx,
 		config,
+		nil,
+		nil,
 		nil,
 		nil,
 		nil,
@@ -122,10 +126,22 @@ func (n *Node) BootStrap() {
 			n.Host.SetStreamHandler(protocol.ID(p), n.handleCommandStream)
 		}
 	}
+
+	n.AccessStore = NewAccessStore(n.Config.Path)
+	err = n.AccessStore.LoadRights()
+	if err != nil {
+		logger.Error(err)
+	}
+	n.AccessVerifier = NewAccessVerifier(n.AccessStore, &ConsoleAllower{}, n.Host, n.Context, n.DataDht)
 }
 
-func (n *Node) handleCommandStream(network.Stream) {
-	// TODO:
+func (n *Node) handleCommandStream(stream network.Stream) {
+	defer stream.Close()
+	result, err := n.AccessVerifier.Verify(stream)
+	if err != nil {
+		logger.Error(err, result)
+	}
+	// TODO: Handle console commands
 }
 
 func (n *Node) connectBootstrap() {
@@ -160,6 +176,10 @@ func (n *Node) PrintList() {
 
 	fmt.Println("Starting search")
 	for p := range peerChan {
+		if p.ID.String() == n.Host.ID().String() {
+			continue
+		}
+
 		name, err := n.DataDht.GetValue(n.Context, nameKey(p.ID), dht.Quorum(1))
 		if err != nil {
 			logger.Warning(err)

@@ -1,7 +1,9 @@
 package config
 
-const StreamID = "/stream/1.0.0"
-const EventID = "/event/1.0.0"
+import "github.com/libp2p/go-libp2p-core/protocol"
+
+const StreamID = protocol.ID("/stream/1.0.0")
+const EventID = protocol.ID("/event/1.0.0")
 
 type SharingOptions struct {
 	StreamOptions         map[string]string
@@ -14,7 +16,7 @@ type SharingConfig struct {
 }
 
 // Contains tells whether a contains x.
-func contains(a []string, x string) bool {
+func contains(a []protocol.ID, x protocol.ID) bool {
 	for _, n := range a {
 		if x == n {
 			return true
@@ -29,7 +31,7 @@ func NewSharingConfig(bootstrap *BootstrapConfig) *SharingConfig {
 		SharingOptions:  &SharingOptions{},
 	}
 
-	for _, p := range []string{StreamID, EventID} {
+	for _, p := range []protocol.ID{StreamID, EventID} {
 		if !contains(config.Protocols, p) {
 			config.Protocols = append(config.Protocols, p)
 		}
@@ -58,6 +60,14 @@ func NewSharingConfig(bootstrap *BootstrapConfig) *SharingConfig {
 	return config
 }
 
+func (b *SharingConfig) UpdateDefaults() {
+	b.BootstrapConfig.UpdateDefaults()
+
+	v := b.Viper
+	v.SetDefault("sharing.stream", b.SharingOptions.StreamOptions)
+	v.SetDefault("sharing.screengrabbing", b.SharingOptions.ScreenGrabbingOptions)
+}
+
 func (b *SharingConfig) LoadConfig() error {
 	err := b.BootstrapConfig.LoadConfig()
 	if err != nil {
@@ -75,12 +85,4 @@ func (b *SharingConfig) LoadConfig() error {
 	}
 
 	return nil
-}
-
-func (b *SharingConfig) UpdateDefaults() {
-	b.BootstrapConfig.UpdateDefaults()
-
-	v := b.Viper
-	v.SetDefault("sharing.stream", &b.SharingOptions.StreamOptions)
-	v.SetDefault("sharing.screengrabbing", &b.SharingOptions.ScreenGrabbingOptions)
 }
