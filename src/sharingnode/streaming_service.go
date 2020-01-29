@@ -4,7 +4,6 @@ package sharingnode
 // #include <stdint.h>
 import "C"
 import (
-	"context"
 	"github.com/imkira/go-libav/avcodec"
 	"github.com/imkira/go-libav/avutil"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -18,7 +17,7 @@ type DisplayInfo struct {
 	Height int `json:"height"`
 }
 
-type ScreenInfo struct {
+type DisplaysInfo struct {
 	Displays []DisplayInfo `json:"displays"`
 }
 
@@ -28,7 +27,7 @@ type StreamOptions struct {
 
 type ScreenOptions struct {
 	GrabbingOptions map[string]string `json:"grabbing_options"`
-	TargetDisplay   int               `json:"target_display"`
+	TargetDisplay   uint32            `json:"target_display"`
 }
 
 type StreamInfo struct {
@@ -94,10 +93,9 @@ func NewStreamSession() *StreamSession {
 	return session
 }
 
-func (s *StreamSession) Start(options *StreamInfo) error {
-	provider, err := NewImageProvider(&options.ScreenOptions)
+func (s *StreamSession) Start(options *StreamInfo, displaysInfo *DisplaysInfo) error {
+	provider, err := NewImageProvider(&options.ScreenOptions, displaysInfo)
 	if err != nil {
-		provider.Close()
 		return err
 	}
 
@@ -179,7 +177,7 @@ func NewStreamService() *StreamService {
 	return &StreamService{}
 }
 
-func (s *StreamService) AddClient(stream network.Stream, info *StreamInfo) error {
+func (s *StreamService) AddClient(stream network.Stream, info *StreamInfo, displaysInfo *DisplaysInfo) error {
 	s.Lock()
 	defer s.Unlock()
 	//defer func() {
@@ -198,7 +196,7 @@ func (s *StreamService) AddClient(stream network.Stream, info *StreamInfo) error
 	if s.ActiveSession == nil {
 		s.ActiveSession = NewStreamSession()
 
-		err = s.ActiveSession.Start(info)
+		err = s.ActiveSession.Start(info, displaysInfo)
 		if err != nil {
 			s.ActiveSession = nil
 			return err
@@ -221,7 +219,7 @@ func (s *StreamService) RemoveClient(client *Client) {
 	}
 }
 
-func StreamReceive(streamCtx context.Context, width, height int, reader *DataReader, onImage func(img *image.YCbCr) error) {
+func StreamReceive(width, height int, reader *DataReader, onImage func(img *image.YCbCr) error) {
 	//avutil.SetLogLevel(avutil.LogLevelDebug)
 
 	codec := avcodec.FindDecoderByName("h264")

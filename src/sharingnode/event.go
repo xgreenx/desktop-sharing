@@ -25,6 +25,10 @@ const (
 	Scroll
 )
 
+type EventInfo struct {
+	TargetDisplay uint32 `json:"target_display"`
+}
+
 type Event struct {
 	Type EventType `json:"id"`
 

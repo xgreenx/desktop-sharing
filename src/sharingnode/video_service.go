@@ -6,7 +6,6 @@ import (
 	"github.com/imkira/go-libav/avformat"
 	"github.com/imkira/go-libav/avutil"
 	"github.com/imkira/go-libav/swscale"
-	"github.com/kbinani/screenshot"
 	"github.com/pkg/errors"
 	"sync"
 )
@@ -24,15 +23,17 @@ type ImageProvider struct {
 	optionsScreen   *avutil.Dictionary
 }
 
-func NewImageProvider(options *ScreenOptions) (*ImageProvider, error) {
-	rect := screenshot.GetDisplayBounds(options.TargetDisplay)
+func NewImageProvider(options *ScreenOptions, displaysInfo *DisplaysInfo) (*ImageProvider, error) {
 	provider := &ImageProvider{
 		ScreenOptions: *options,
-		DisplayInfo: DisplayInfo{
-			Width:  rect.Dx(),
-			Height: rect.Dy(),
-		},
+		DisplayInfo:   displaysInfo.Displays[int(options.TargetDisplay)],
 	}
+
+	offsetX := 0
+	for i := int(options.TargetDisplay); i < len(displaysInfo.Displays); i++ {
+		offsetX += displaysInfo.Displays[i].Width
+	}
+
 	provider.optionsScreen = avutil.NewDictionary()
 
 	var err error
@@ -64,7 +65,7 @@ func NewImageProvider(options *ScreenOptions) (*ImageProvider, error) {
 		}
 	}
 
-	err = provider.avFormatContext.OpenInput(":0.0+0,0", provider.avInputFormat, provider.optionsScreen)
+	err = provider.avFormatContext.OpenInput(fmt.Sprintf(":0.0+%d,0", offsetX), provider.avInputFormat, provider.optionsScreen)
 	if err != nil {
 		goto Error
 	}

@@ -6,10 +6,19 @@
 
 
 ```cassandraql
-sudo apt-get install libavcodec-ffmpeg56 libavcodec-dev libavutil-dev libavcodec-dev libavutil-dev
-ln -s /usr/lib/x86_64-linux-gnu/libavutil-ffmpeg.so.54 /usr/lib/x86_64-linux-gnu/libavutil-ffmpeg.so
+sudo apt-get install libavcodec-dev libavutil-dev libavdevice-dev libavformat-dev
 sudo add-apt-repository ppa:jonathonf/ffmpeg-4
 sudo apt-get update
 sudo apt-get install ffmpeg
+
+sudo apt-get install libglu1-mesa-dev
+sudo apt-get install gcc libc6-dev
+
+sudo apt-get install libx11-dev xorg-dev libxtst-dev libpng++-dev
+
+sudo apt-get install xcb libxcb-xkb-dev x11-xkb-utils libx11-xcb-dev libxkbcommon-x11-dev
+sudo apt-get install libxkbcommon-dev
+
+sudo apt-get install xsel xclip
 
 ```
