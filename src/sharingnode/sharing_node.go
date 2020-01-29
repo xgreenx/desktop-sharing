@@ -4,7 +4,7 @@ import "C"
 import (
 	"bufio"
 	"context"
-	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fyne.io/fyne"
 	"fyne.io/fyne/app"
@@ -28,6 +28,7 @@ var logger = log.Logger("sharingnode")
 type SharingNode struct {
 	*node.Node
 	*config.SharingOptions
+	StreamService *StreamService
 }
 
 func NewSharingNode(ctx context.Context, config *config.SharingConfig) *SharingNode {
@@ -35,6 +36,7 @@ func NewSharingNode(ctx context.Context, config *config.SharingConfig) *SharingN
 	return &SharingNode{
 		n,
 		config.SharingOptions,
+		nil,
 	}
 }
 
@@ -50,6 +52,7 @@ func (n *SharingNode) BootStrap() {
 		}
 	}
 	n.AccessVerifier = node.NewAccessVerifier(n.AccessStore, NewGUIAllower(n.Config), n.Host, n.Context, n.DataDht)
+	n.StreamService = NewStreamService()
 }
 
 func (n *SharingNode) ShareScreen(id peer.ID) error {
@@ -69,7 +72,7 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 		return err
 	}
 
-	StartRemoteDesktop(stream, event)
+	StartRemoteDesktop(stream, event, *n.SharingOptions)
 	err = stream.Close()
 	if err != nil {
 		logger.Error(err)
@@ -89,18 +92,6 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 
 func (n *SharingNode) handleScreenStream(stream network.Stream) {
 	logger.Info("Got a new sharing connection!")
-	defer func() {
-		err := stream.Close()
-		if err != nil {
-			logger.Error(err)
-		}
-	}()
-
-	defer func() {
-		f, _ := os.Create("StreamHeapW.out")
-		pprof.WriteHeapProfile(f)
-	}()
-
 	result, err := n.AccessVerifier.Verify(stream)
 	if err != nil {
 		logger.Warning(err)
@@ -109,14 +100,35 @@ func (n *SharingNode) handleScreenStream(stream network.Stream) {
 		return
 	}
 
-	//peerInfo, err := peer.AddrInfoFromP2pAddr(stream.Conn().RemoteMultiaddr())
-	//if err != nil {
-	//	panic(err)
-	//}
-	//n.Host.Connect(n.Context, *peerInfo)
+	num := screenshot.NumActiveDisplays()
+	screenInfo := &ScreenInfo{
+		Displays: make([]DisplayInfo, num),
+	}
+	for i := 0; i < num; i++ {
+		screenInfo.Displays[i] = DisplayInfo{
+			Width:  screenshot.GetDisplayBounds(i).Dx(),
+			Height: screenshot.GetDisplayBounds(i).Dy(),
+		}
+	}
 
-	targetDisplay := 0
-	StartScreenSharing(stream, targetDisplay)
+	err = write(stream, screenInfo)
+	if err != nil {
+		logger.Error(err)
+		return
+	}
+
+	streamInfo := &StreamInfo{}
+	err = read(stream, streamInfo)
+	if err != nil {
+		logger.Error(err)
+		return
+	}
+
+	err = n.StreamService.AddClient(stream, streamInfo)
+	if err != nil {
+		logger.Error(err)
+		return
+	}
 }
 
 func (n *SharingNode) handleScreenEvent(stream network.Stream) {
@@ -154,76 +166,47 @@ func (n *SharingNode) handleScreenEvent(stream network.Stream) {
 	receiver.Run()
 }
 
-func writeInt(writer io.Writer, val int) error {
-	b := make([]byte, 8)
-	binary.LittleEndian.PutUint64(b, uint64(val))
-	_, err := writer.Write(b)
+func write(writer io.Writer, val interface{}) error {
+	b, err := json.Marshal(val)
 	if err != nil {
 		return err
 	}
 
-	return nil
+	_, err = writer.Write(append(b, '\n'))
+
+	return err
 }
 
-func readInt(reader io.Reader) (int, error) {
-	b := make([]byte, 8)
-	_, err := reader.Read(b)
+func read(reader io.Reader, val interface{}) error {
+	r := bufio.NewReader(reader)
+	b, err := r.ReadBytes('\n')
 	if err != nil {
-		return 0, err
+		return err
 	}
-	return int(binary.LittleEndian.Uint64(b)), nil
+
+	return json.Unmarshal(b, val)
 }
 
-func StartScreenSharing(writer network.Stream, targetDisplay int) {
-	logger.Info("Start sharing screen")
-	streamCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	bounds := screenshot.GetDisplayBounds(targetDisplay)
-	w := bounds.Dx()
-	h := bounds.Dy()
-	err := writeInt(writer, w)
-	if err != nil {
-		logger.Error(err)
-		return
-	}
-	err = writeInt(writer, h)
-	if err != nil {
-		logger.Error(err)
-		return
-	}
-
-	dataCh := make(chan []byte, 4)
-	go func() {
-		var err error
-		defer cancel()
-		defer logger.Error(err)
-		for data := range dataCh {
-			b := make([]byte, 8)
-			binary.LittleEndian.PutUint64(b, uint64(len(data)))
-
-			_, err = writer.Write(append(b, data...))
-			if err != nil {
-				return
-			}
-		}
-	}()
-	StreamSend(streamCtx, w, h, dataCh)
-	logger.Info("End sharing screen")
-}
-
-func StartRemoteDesktop(stream network.Stream, event network.Stream) {
+func StartRemoteDesktop(stream network.Stream, event network.Stream, options config.SharingOptions) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	var err error
-	width, err := readInt(stream)
+	screenInfo := &ScreenInfo{}
+	err = read(stream, screenInfo)
 	if err != nil {
 		logger.Error(err)
 		return
 	}
 
-	height, err := readInt(stream)
+	targetDisplay := 0
+	remoteDisplay := screenInfo.Displays[targetDisplay]
+
+	streamInfo := &StreamInfo{}
+	streamInfo.StreamOptions.Options = options.StreamOptions
+	streamInfo.ScreenOptions.GrabbingOptions = options.ScreenGrabbingOptions
+	streamInfo.ScreenOptions.TargetDisplay = targetDisplay
+	err = write(stream, streamInfo)
 	if err != nil {
 		logger.Error(err)
 		return
@@ -231,12 +214,12 @@ func StartRemoteDesktop(stream network.Stream, event network.Stream) {
 
 	myapp := app.New()
 	win := myapp.NewWindow("Desktop Sharing")
-	win.Resize(fyne.Size{width, height})
+	win.Resize(fyne.Size{remoteDisplay.Width, remoteDisplay.Height})
 
-	imgWidget := canvas.NewImageFromImage(image.NewYCbCr(image.Rect(0, 0, width, height), image.YCbCrSubsampleRatio420))
+	imgWidget := canvas.NewImageFromImage(image.NewYCbCr(image.Rect(0, 0, remoteDisplay.Width, remoteDisplay.Height), image.YCbCrSubsampleRatio420))
 	win.SetContent(imgWidget)
 
-	eventSender := NewEventSender(bufio.NewWriter(event), width, height)
+	eventSender := NewEventSender(bufio.NewWriter(event), remoteDisplay.Width, remoteDisplay.Height)
 	eventSender.Subscribe(win)
 
 	var closeCallback glfw.CloseCallback
@@ -248,43 +231,19 @@ func StartRemoteDesktop(stream network.Stream, event network.Stream) {
 		closeCallback(w)
 	})
 
-	senderChan := make(chan []byte)
-	onImage := func(img *image.YCbCr) {
+	onImage := func(img *image.YCbCr) error {
 		imgWidget.Image = img
 		c := win.Canvas()
 		if c != nil {
 			c.Refresh(imgWidget)
 		}
+
+		return nil
 	}
-	go StreamReceive(streamCtx, width, height, senderChan, onImage)
 
-	tmp := make([]byte, width*height*4)
-	go func() {
-		defer close(senderChan)
-		for {
-			frameSize, err := readInt(stream)
-			if err != nil {
-				logger.Error(err)
-				cancel()
-				return
-			}
+	reader := NewDataReader(stream)
 
-			off := 0
-			for off < frameSize {
-				n, err := stream.Read(tmp[off:frameSize])
-				if err != nil {
-					logger.Error(err)
-					cancel()
-					return
-				}
-				off += n
-			}
-
-			data := make([]byte, frameSize)
-			copy(data, tmp[:frameSize])
-			senderChan <- data
-		}
-	}()
+	go StreamReceive(streamCtx, remoteDisplay.Width, remoteDisplay.Height, reader, onImage)
 
 	win.ShowAndRun()
 }

@@ -59,7 +59,7 @@ func (n *Node) BootStrap() {
 	var err error
 	relayOpt := make([]relay.RelayOpt, 0)
 
-	logger.Debug("Hop:", n.Config.Hop)
+	logger.Debug("Hop: %s", n.Config.Hop)
 	if n.Config.Hop {
 		relayOpt = append(relayOpt, relay.OptHop)
 	}
@@ -189,7 +189,11 @@ func (n *Node) PrintList() {
 		latency := <-n.PingService.Ping(childCtx, p.ID)
 		cancel()
 
-		fmt.Printf("Id: %s, status: %s, name: %s\n", p.ID, latency, name)
+		status := "success"
+		if latency.Error != nil {
+			status = "error"
+		}
+		fmt.Printf("Id: %s, latency: %s, status: %s, name: %s\n", p.ID, latency.RTT, status, name)
 	}
 	fmt.Println("End search")
 }

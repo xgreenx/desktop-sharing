@@ -70,11 +70,9 @@ func main() {
 	ctx := context.Background()
 	node := sharingnode.NewSharingNode(ctx, conf)
 	node.BootStrap()
-
-	//if len(node.Config.BootstrapPeers) > 0 {
-	//	peerinfo, _ := peer.AddrInfoFromP2pAddr(node.Config.BootstrapPeers[0])
-	//	node.ShareScreen(peerinfo.ID)
-	//}
+	//
+	//peerId, _ := peer.Decode("12D3KooWEj6GxaVrmKWEciRjQkBfEPvTqMyNxtBmmzvnNkavCo18")
+	//node.ShareScreen(peerId)
 	//
 	//select {}
 	ScanInputCommands(node)
