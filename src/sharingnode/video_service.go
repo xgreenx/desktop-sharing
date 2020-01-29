@@ -30,7 +30,7 @@ func NewImageProvider(options *ScreenOptions, displaysInfo *DisplaysInfo) (*Imag
 	}
 
 	offsetX := 0
-	for i := int(options.TargetDisplay); i < len(displaysInfo.Displays); i++ {
+	for i := 0; i < int(options.TargetDisplay); i++ {
 		offsetX += displaysInfo.Displays[i].Width
 	}
 
