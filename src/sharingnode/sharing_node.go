@@ -211,7 +211,8 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 
 type RemoteScreen struct {
 	config.SharingOptions
-	DisplayInfo
+	Width          int
+	Height         int
 	id             peer.ID
 	targetDisplay  uint32
 	accessVerifier *node.AccessVerifier
@@ -244,10 +245,10 @@ func NewRemoteScreen(id peer.ID, targetDisplay uint32, options *config.SharingOp
 		return nil, err
 	}
 
-	remoteDisplay := displaysInfo.Displays[targetDisplay]
 	r := &RemoteScreen{
 		SharingOptions: *options,
-		DisplayInfo:    remoteDisplay,
+		Width:          1280,
+		Height:         720,
 		id:             id,
 		targetDisplay:  targetDisplay,
 		accessVerifier: verifier,
@@ -314,9 +315,11 @@ func (r *RemoteScreen) ShowAndRun() error {
 
 		return nil
 	}
-	go StreamReceive(r.Width, r.Height, r.reader, onImage)
+	go StreamReceive(r.reader, onImage)
 
-	r.eventSender.Subscribe(win)
+	if r.eventSender != nil {
+		r.eventSender.Subscribe(win)
+	}
 	win.ShowAndRun()
 	return nil
 }

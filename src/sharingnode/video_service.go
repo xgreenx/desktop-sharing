@@ -13,7 +13,9 @@ import (
 type ImageProvider struct {
 	sync.Mutex
 	ScreenOptions
-	DisplayInfo
+	RemoteDisplay   DisplayInfo
+	Width           int
+	Height          int
 	swsContext      *swscale.Context
 	avFormatContext *avformat.Context
 	avInputFormat   *avformat.Input
@@ -26,9 +28,10 @@ type ImageProvider struct {
 func NewImageProvider(options *ScreenOptions, displaysInfo *DisplaysInfo) (*ImageProvider, error) {
 	provider := &ImageProvider{
 		ScreenOptions: *options,
-		DisplayInfo:   displaysInfo.Displays[int(options.TargetDisplay)],
+		Width:         1280,
+		Height:        720,
+		RemoteDisplay: displaysInfo.Displays[int(options.TargetDisplay)],
 	}
-
 	offsetX := 0
 	for i := 0; i < int(options.TargetDisplay); i++ {
 		offsetX += displaysInfo.Displays[i].Width
@@ -38,7 +41,7 @@ func NewImageProvider(options *ScreenOptions, displaysInfo *DisplaysInfo) (*Imag
 
 	var err error
 	provider.swsContext, err = swscale.NewContext(
-		&swscale.DataDescription{provider.Width, provider.Height, avutil.PIX_FMT_RGBA},
+		&swscale.DataDescription{provider.RemoteDisplay.Width, provider.RemoteDisplay.Height, avutil.PIX_FMT_RGBA},
 		&swscale.DataDescription{provider.Width, provider.Height, avutil.PIX_FMT_YUV420P},
 	)
 	if err != nil {
@@ -57,7 +60,7 @@ func NewImageProvider(options *ScreenOptions, displaysInfo *DisplaysInfo) (*Imag
 		goto Error
 	}
 
-	provider.ScreenOptions.GrabbingOptions["video_size"] = fmt.Sprintf("%dx%d", provider.Width, provider.Height)
+	provider.ScreenOptions.GrabbingOptions["video_size"] = fmt.Sprintf("%dx%d", provider.RemoteDisplay.Width, provider.RemoteDisplay.Height)
 	for key, value := range provider.ScreenOptions.GrabbingOptions {
 		err = provider.optionsScreen.Set(key, value)
 		if err != nil {
@@ -136,7 +139,7 @@ func (i *ImageProvider) Image(onImage func(*avutil.Frame) error) error {
 			return err
 		}
 
-		i.swsContext.Scale(decFrame, 0, i.Height, i.encFrame)
+		i.swsContext.Scale(decFrame, 0, i.RemoteDisplay.Height, i.encFrame)
 		err = onImage(i.encFrame)
 		decFrame.FreeData(0)
 		return err
@@ -207,7 +210,7 @@ func (e *VideoEncoder) Encode(provider *ImageProvider) (chan []byte, error) {
 		goto Error
 	}
 
-	e.codecContext.SetBitRate(90000)
+	e.codecContext.SetBitRate(900000)
 	e.codecContext.SetWidth(provider.Width)
 	e.codecContext.SetHeight(provider.Height)
 	e.codecContext.SetTimeBase(avutil.NewRational(1, 10))

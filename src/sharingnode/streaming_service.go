@@ -219,7 +219,7 @@ func (s *StreamService) RemoveClient(client *Client) {
 	}
 }
 
-func StreamReceive(width, height int, reader *DataReader, onImage func(img *image.YCbCr) error) {
+func StreamReceive(reader *DataReader, onImage func(img *image.YCbCr) error) {
 	//avutil.SetLogLevel(avutil.LogLevelDebug)
 
 	codec := avcodec.FindDecoderByName("h264")
@@ -248,10 +248,6 @@ func StreamReceive(width, height int, reader *DataReader, onImage func(img *imag
 
 	defer packet.Free()
 	defer codecContext.Free()
-
-	ySize := width * height
-	cdSize := width * height / 4
-	crSize := width * height / 4
 
 	needParse := true
 	for {
@@ -283,10 +279,13 @@ func StreamReceive(width, height int, reader *DataReader, onImage func(img *imag
 			}
 
 			onFrame := func(f *avutil.Frame) error {
+				ySize := f.Width() * f.Height()
+				cdSize := f.Width() * f.Height() / 4
+				crSize := f.Width() * f.Height() / 4
 				yData := C.GoBytes(f.Data(0), C.int(ySize))
 				cbData := C.GoBytes(f.Data(1), C.int(cdSize))
 				crData := C.GoBytes(f.Data(2), C.int(crSize))
-				img := image.NewYCbCr(image.Rect(0, 0, width, height), image.YCbCrSubsampleRatio420)
+				img := image.NewYCbCr(image.Rect(0, 0, f.Width(), f.Height()), image.YCbCrSubsampleRatio420)
 				for i := 0; i < ySize; i++ {
 					img.Y[i] = yData[i]
 					if i < cdSize {
