@@ -63,6 +63,7 @@ func (a GUIAllower) Allow(c *node.ConnectionInfo) (node.AllowResult, error) {
 
 	myapp := app.New()
 	w := myapp.NewWindow("Allow access")
+	w.Resize(fyne.NewSize(1280, 720))
 
 	result := node.NewAllowResult()
 
