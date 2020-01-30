@@ -49,7 +49,8 @@ func (r *Rights) Id() peer.ID {
 }
 
 func (r *Rights) IsAllowed(id protocol.ID) bool {
-	return r.Rights[getProtocolName(id)]
+	result, ok := r.Rights[getProtocolName(id)]
+	return result && ok
 }
 
 func (r *Rights) Allow(id protocol.ID) {

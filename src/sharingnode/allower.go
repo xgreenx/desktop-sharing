@@ -54,7 +54,12 @@ func getAccessLabel(id protocol.ID) string {
 
 func (a GUIAllower) Allow(c *node.ConnectionInfo) (node.AllowResult, error) {
 	a.Lock()
-	defer a.Unlock()
+	defer func() {
+		a.Unlock()
+		if r := recover(); r != nil {
+			logger.Error("Recovered in Allow", r)
+		}
+	}()
 
 	myapp := app.New()
 	w := myapp.NewWindow("Allow access")
@@ -89,10 +94,13 @@ func (a GUIAllower) Allow(c *node.ConnectionInfo) (node.AllowResult, error) {
 		okButton,
 	})
 
-	w.SetContent(widget.NewVBox(
+	vBox := widget.NewVBox(
 		objects...,
-	))
+	)
+	w.SetContent(vBox)
 	w.CenterOnScreen()
+	//time.Sleep(1)
+	//w.Canvas().Refresh(w.Content())
 
 	w.ShowAndRun()
 

@@ -79,51 +79,54 @@ func read(reader io.Reader, val interface{}) error {
 func (n *SharingNode) handleScreenStream(stream network.Stream) {
 	logger.Info("Got a new sharing connection!")
 	result, err := n.AccessVerifier.Verify(stream)
-	if err != nil {
-		logger.Warning(err)
-	}
-	if !result {
-		return
-	}
 
-	num := screenshot.NumActiveDisplays()
-	displaysInfo := &DisplaysInfo{
-		Displays: make([]DisplayInfo, num),
-	}
-	for i := 0; i < num; i++ {
-		displaysInfo.Displays[i] = DisplayInfo{
-			Width:  screenshot.GetDisplayBounds(i).Dx(),
-			Height: screenshot.GetDisplayBounds(i).Dy(),
+	if !result {
+		goto Error
+	} else {
+		num := screenshot.NumActiveDisplays()
+		displaysInfo := &DisplaysInfo{
+			Displays: make([]DisplayInfo, num),
+		}
+		streamInfo := &StreamInfo{}
+		for i := 0; i < num; i++ {
+			displaysInfo.Displays[i] = DisplayInfo{
+				Width:  screenshot.GetDisplayBounds(i).Dx(),
+				Height: screenshot.GetDisplayBounds(i).Dy(),
+			}
+		}
+
+		err = write(stream, displaysInfo)
+		if err != nil {
+			goto Error
+		}
+		err = read(stream, streamInfo)
+		if err != nil {
+			goto Error
+		}
+
+		if uint32(len(displaysInfo.Displays)) <= streamInfo.ScreenOptions.TargetDisplay {
+			streamInfo.ScreenOptions.TargetDisplay = uint32(len(displaysInfo.Displays)) - 1
+		}
+
+		err = n.StreamService.AddClient(stream, streamInfo, displaysInfo)
+		if err != nil {
+			goto Error
 		}
 	}
 
-	err = write(stream, displaysInfo)
+	return
+Error:
+	logger.Info("End sharing connection!")
+	stream.Close()
 	if err != nil {
 		logger.Error(err)
-		return
-	}
-
-	streamInfo := &StreamInfo{}
-	err = read(stream, streamInfo)
-	if err != nil {
-		logger.Error(err)
-		return
-	}
-
-	if uint32(len(displaysInfo.Displays)) <= streamInfo.ScreenOptions.TargetDisplay {
-		streamInfo.ScreenOptions.TargetDisplay = uint32(len(displaysInfo.Displays)) - 1
-	}
-
-	err = n.StreamService.AddClient(stream, streamInfo, displaysInfo)
-	if err != nil {
-		logger.Error(err)
-		return
 	}
 }
 
 func (n *SharingNode) handleScreenEvent(stream network.Stream) {
 	logger.Info("Got a new event connection!")
 	defer func() {
+		logger.Info("End event connection!")
 		err := stream.Close()
 		if err != nil {
 			logger.Error(err)
