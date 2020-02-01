@@ -87,13 +87,13 @@ func (n *SharingNode) handleScreenStream(stream network.Stream) {
 		displaysInfo := &DisplaysInfo{
 			Displays: make([]DisplayInfo, num),
 		}
-		streamInfo := &StreamInfo{}
 		for i := 0; i < num; i++ {
 			displaysInfo.Displays[i] = DisplayInfo{
 				Width:  screenshot.GetDisplayBounds(i).Dx(),
 				Height: screenshot.GetDisplayBounds(i).Dy(),
 			}
 		}
+		streamInfo := &StreamInfo{}
 
 		err = write(stream, displaysInfo)
 		if err != nil {
@@ -108,7 +108,11 @@ func (n *SharingNode) handleScreenStream(stream network.Stream) {
 			streamInfo.ScreenOptions.TargetDisplay = uint32(len(displaysInfo.Displays)) - 1
 		}
 
-		err = n.StreamService.AddClient(stream, streamInfo, displaysInfo)
+		client, err := n.StreamService.AddClient(stream, streamInfo, displaysInfo)
+		if err != nil {
+			goto Error
+		}
+		err = client.Start()
 		if err != nil {
 			goto Error
 		}
@@ -179,11 +183,11 @@ func (n *SharingNode) handleScreenEvent(stream network.Stream) {
 		offsetX = offsetX + screenshot.GetDisplayBounds(int(i)).Dx()
 	}
 
-	receiver := NewEventReceiver(bufio.NewReader(stream), offsetX)
+	receiver := NewEventReceiver(stream, offsetX)
 	receiver.Run()
 }
 
-func (n *SharingNode) ShareScreen(id peer.ID) error {
+func (n *SharingNode) ShareScreen(id peer.ID, targetDisplay int, control bool) error {
 	if id == n.Host.ID() {
 		return errors.New("can't share screen to self")
 	}
@@ -195,9 +199,7 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 	}()
 
 	logger.Debug("Connecting to:", id)
-	targetDisplay := uint32(0)
-	control := true
-	screen, err := NewRemoteScreen(id, targetDisplay, n.SharingOptions, n.AccessVerifier)
+	screen, err := NewRemoteScreen(id, uint32(targetDisplay), n.SharingOptions, n.AccessVerifier)
 	if err != nil {
 		return err
 	}
@@ -214,13 +216,13 @@ func (n *SharingNode) ShareScreen(id peer.ID) error {
 
 type RemoteScreen struct {
 	config.SharingOptions
-	Width          int
-	Height         int
+	Resolution     RecordResolution
+	RemoteDisplay  DisplayInfo
 	id             peer.ID
 	targetDisplay  uint32
 	accessVerifier *node.AccessVerifier
-	eventSender    *EventSender
-	reader         *DataReader
+	stream         network.Stream
+	event          network.Stream
 }
 
 func NewRemoteScreen(id peer.ID, targetDisplay uint32, options *config.SharingOptions, verifier *node.AccessVerifier) (*RemoteScreen, error) {
@@ -240,6 +242,7 @@ func NewRemoteScreen(id peer.ID, targetDisplay uint32, options *config.SharingOp
 	}
 
 	streamInfo := &StreamInfo{}
+	streamInfo.Resolution = options.Resolution
 	streamInfo.StreamOptions.Options = options.StreamOptions
 	streamInfo.ScreenOptions.GrabbingOptions = options.ScreenGrabbingOptions
 	streamInfo.ScreenOptions.TargetDisplay = targetDisplay
@@ -248,22 +251,22 @@ func NewRemoteScreen(id peer.ID, targetDisplay uint32, options *config.SharingOp
 		return nil, err
 	}
 
+	remoteDisplay := displaysInfo.Displays[targetDisplay]
 	r := &RemoteScreen{
 		SharingOptions: *options,
-		Width:          1280,
-		Height:         720,
+		RemoteDisplay:  remoteDisplay,
+		Resolution:     *NewRecordResolution(remoteDisplay.Width, options.Resolution),
 		id:             id,
 		targetDisplay:  targetDisplay,
 		accessVerifier: verifier,
+		stream:         stream,
 	}
-
-	r.reader = NewDataReader(stream)
 
 	return r, nil
 }
 
 func (r *RemoteScreen) AddControl() error {
-	if r.eventSender != nil {
+	if r.event != nil {
 		return nil
 	}
 	event, err := r.accessVerifier.Access(r.id, protocol.ID(config.EventID))
@@ -281,7 +284,6 @@ func (r *RemoteScreen) AddControl() error {
 	if uint32(len(displaysInfo.Displays)) <= r.targetDisplay {
 		r.targetDisplay = uint32(len(displaysInfo.Displays)) - 1
 	}
-	remoteDisplay := displaysInfo.Displays[r.targetDisplay]
 
 	eventInfo := &EventInfo{}
 	eventInfo.TargetDisplay = r.targetDisplay
@@ -289,8 +291,7 @@ func (r *RemoteScreen) AddControl() error {
 	if err != nil {
 		return err
 	}
-
-	r.eventSender = NewEventSender(bufio.NewWriter(event), remoteDisplay.Width, remoteDisplay.Height)
+	r.event = event
 
 	return nil
 }
@@ -298,9 +299,9 @@ func (r *RemoteScreen) AddControl() error {
 func (r *RemoteScreen) ShowAndRun() error {
 	myapp := app.New()
 	win := myapp.NewWindow("Desktop Sharing")
-	win.Resize(fyne.Size{r.Width, r.Height})
+	win.Resize(fyne.Size{r.Resolution.Width, r.Resolution.Height})
 
-	imgWidget := canvas.NewImageFromImage(image.NewYCbCr(image.Rect(0, 0, r.Width, r.Height), image.YCbCrSubsampleRatio420))
+	imgWidget := canvas.NewImageFromImage(image.NewYCbCr(image.Rect(0, 0, r.Resolution.Width, r.Resolution.Height), image.YCbCrSubsampleRatio420))
 	win.SetContent(imgWidget)
 
 	var closeCallback glfw.CloseCallback
@@ -318,14 +319,49 @@ func (r *RemoteScreen) ShowAndRun() error {
 
 		return nil
 	}
-	go StreamReceive(r.reader, onImage)
+	reader := NewDataReader(r.stream)
+	streamErr := StreamReceive(reader, onImage)
 
-	if r.eventSender != nil {
-		r.eventSender.Subscribe(win)
+	var eventSender *EventSender
+	if r.event != nil {
+		eventSender = NewEventSender(r.event, r.RemoteDisplay.Width, r.RemoteDisplay.Height)
+		eventSender.Subscribe(win)
 	}
+
+	go func() {
+		var err error
+		var ok bool
+		if eventSender != nil {
+			select {
+			case err, ok = <-streamErr:
+			case err, ok = <-eventSender.Error():
+			}
+		} else {
+			select {
+			case err, ok = <-streamErr:
+			}
+		}
+
+		if ok {
+			logger.Info(err)
+			myapp.Quit()
+			r.close()
+		}
+	}()
+
 	win.ShowAndRun()
 	return nil
 }
 
 func (r *RemoteScreen) close() {
+	err := r.stream.Reset()
+	if err != nil {
+		logger.Error(err)
+	}
+	if r.event != nil {
+		err = r.event.Reset()
+		if err != nil {
+			logger.Error(err)
+		}
+	}
 }

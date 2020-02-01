@@ -2,11 +2,11 @@ package sharingnode
 
 import "C"
 import (
-	"bufio"
 	"encoding/json"
 	"fyne.io/fyne"
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"github.com/go-vgo/robotgo"
+	"github.com/libp2p/go-libp2p-core/network"
 	"math"
 	"sync"
 	"time"
@@ -43,68 +43,42 @@ type Event struct {
 }
 
 type EventSender struct {
-	sync.Mutex
-	writer           *bufio.Writer
 	activeMouseClick bool
 	mousePos         fyne.Position
 	remoteWidth      int
 	remoteHeight     int
 	localWidth       int
 	localHeight      int
-	queue            events
+	queue            *DataWriter
 }
 
-func NewEventSender(writer *bufio.Writer, remoteWidth, remoteHeight int) *EventSender {
+func NewEventSender(stream network.Stream, remoteWidth, remoteHeight int) *EventSender {
+	writer := NewDataWriter(stream)
 	return &EventSender{
-		writer:       writer,
 		remoteWidth:  remoteWidth,
 		remoteHeight: remoteHeight,
+		queue:        writer,
 	}
 }
 
+func (e *EventSender) Error() chan error {
+	return e.queue.Error
+}
+
 func (e *EventSender) sendEvent(ev *Event) {
-	e.Lock()
-	defer e.Unlock()
 	scaleX := float64(e.remoteWidth) / float64(e.localWidth)
 	scaleY := float64(e.remoteHeight) / float64(e.localHeight)
 
 	ev.X = int(float64(ev.X) * scaleX)
 	ev.Y = int(float64(ev.Y) * scaleY)
 
-	active := len(e.queue) > 0
-
-	e.queue = append(e.queue, ev)
-
-	if !active {
-		go func() {
-			time.Sleep(20 * time.Millisecond)
-
-			e.Lock()
-			temp := e.queue
-			e.queue = events{}
-			e.Unlock()
-
-			b, err := json.Marshal(temp)
-			if err != nil {
-				logger.Error(err)
-				return
-			}
-
-			b = append(b, '\n')
-
-			_, err = e.writer.Write(b)
-			if err != nil {
-				logger.Error(err)
-				return
-			}
-
-			err = e.writer.Flush()
-			if err != nil {
-				logger.Error(err)
-				return
-			}
-		}()
+	b, err := json.Marshal(ev)
+	if err != nil {
+		logger.Error(err)
+		return
 	}
+
+	e.queue.AddData(b)
 }
 
 func (e *EventSender) keyEvent(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
@@ -175,8 +149,6 @@ func (e *EventSender) Subscribe(win fyne.Window) {
 	win.Viewport().SetKeyCallback(e.keyEvent)
 	var superSizeCallback glfw.SizeCallback
 	superSizeCallback = win.Viewport().SetSizeCallback(func(w *glfw.Window, width int, height int) {
-		e.Lock()
-		defer e.Unlock()
 		superSizeCallback(w, width, height)
 		e.localWidth = width
 		e.localHeight = height
@@ -185,37 +157,33 @@ func (e *EventSender) Subscribe(win fyne.Window) {
 
 type EventReceiver struct {
 	sync.Mutex
-	reader  *bufio.Reader
+	reader  *DataReader
 	offsetX int
 }
 
-func NewEventReceiver(reader *bufio.Reader, offsetX int) *EventReceiver {
+func NewEventReceiver(stream network.Stream, offsetX int) *EventReceiver {
 	return &EventReceiver{
-		reader:  reader,
+		reader:  NewDataReader(stream),
 		offsetX: offsetX,
 	}
 }
 
-type events []*Event
-
-func (e *EventReceiver) receiveEvent() (events, error) {
-	b, err := e.reader.ReadBytes('\n')
+func (e *EventReceiver) receiveEvent() (*Event, error) {
+	b, err := e.reader.GetData()
 	if err != nil {
 		return nil, err
 	}
 
-	ev := &events{}
+	ev := &Event{}
 
 	err = json.Unmarshal(b, ev)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, event := range *ev {
-		event.X = event.X + int(e.offsetX)
-	}
+	ev.X = ev.X + int(e.offsetX)
 
-	return *ev, nil
+	return ev, nil
 }
 
 func (e *EventReceiver) Run() {
@@ -223,39 +191,37 @@ func (e *EventReceiver) Run() {
 	robotgo.SetKeyboardDelay(0)
 	robotgo.SetKeyDelay(0)
 	for {
-		evs, err := e.receiveEvent()
+		ev, err := e.receiveEvent()
 		if err != nil {
 			logger.Error(err)
 			return
 		}
 
 		now := time.Now()
-		for _, ev := range evs {
-			switch ev.Type {
-			case MouseMove:
-				robotgo.MoveMouse(int(ev.X), int(ev.Y))
-			case MouseDown:
-				robotgo.MouseToggle("down", MouseMap[ev.Button])
-			case MouseUp:
-				robotgo.MouseToggle("up", MouseMap[ev.Button])
-			case MouseDrag:
-				robotgo.MoveMouse(int(ev.X), int(ev.Y))
-			case Scroll:
-				direction := "up"
-				if ev.Yoff < 0 {
-					direction = "down"
-				}
-				robotgo.ScrollMouse(int(math.Abs(ev.Yoff)*float64(2)), direction)
-			case KeyDown:
-				key := KeyToString[ev.Key]
-				robotgo.KeyToggle(key, "down")
-			case KeyUp:
-				key := KeyToString[ev.Key]
-				robotgo.KeyToggle(key, "up")
-			case KeyRepeat:
-			default:
-				continue
+		switch ev.Type {
+		case MouseMove:
+			robotgo.MoveMouse(int(ev.X), int(ev.Y))
+		case MouseDown:
+			robotgo.MouseToggle("down", MouseMap[ev.Button])
+		case MouseUp:
+			robotgo.MouseToggle("up", MouseMap[ev.Button])
+		case MouseDrag:
+			robotgo.MoveMouse(int(ev.X), int(ev.Y))
+		case Scroll:
+			direction := "up"
+			if ev.Yoff < 0 {
+				direction = "down"
 			}
+			robotgo.ScrollMouse(int(math.Abs(ev.Yoff)*float64(2)), direction)
+		case KeyDown:
+			key := KeyToString[ev.Key]
+			robotgo.KeyToggle(key, "down")
+		case KeyUp:
+			key := KeyToString[ev.Key]
+			robotgo.KeyToggle(key, "up")
+		case KeyRepeat:
+		default:
+			continue
 		}
 		logger.Debug("Event processed for ", time.Now().Sub(now))
 	}

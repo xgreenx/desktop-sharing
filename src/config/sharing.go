@@ -6,6 +6,7 @@ const StreamID = protocol.ID("/stream/1.0.0")
 const EventID = protocol.ID("/event/1.0.0")
 
 type SharingOptions struct {
+	Resolution            int
 	StreamOptions         map[string]string
 	ScreenGrabbingOptions map[string]string
 }
@@ -37,22 +38,26 @@ func NewSharingConfig(bootstrap *BootstrapConfig) *SharingConfig {
 		}
 	}
 
+	config.SharingOptions.Resolution = 720
+
 	config.SharingOptions.StreamOptions = map[string]string{
-		"preset":    "ultrafast",
-		"crf":       "37",
-		"ar":        "44100",
-		"r":         "10",
-		"ac":        "2",
-		"tune":      "zerolatency",
-		"probesize": "32",
-		"maxrate":   "750k",
-		"bufsize":   "3000k",
+		"preset":       "ultrafast",
+		"crf":          "37",
+		"b":            "750k",
+		"delay":        "0",
+		"r":            "30",
+		"ac":           "0",
+		"tune":         "zerolatency",
+		"probesize":    "32",
+		"bufsize":      "3000k",
+		"time_base":    "1 30",
+		"frame_number": "30",
 	}
 
 	config.SharingOptions.ScreenGrabbingOptions = map[string]string{
 		"preset":     "ultrafast",
 		"draw_mouse": "0",
-		"r":          "10",
+		"r":          "30",
 	}
 
 	config.UpdateDefaults()
@@ -64,6 +69,7 @@ func (b *SharingConfig) UpdateDefaults() {
 	b.BootstrapConfig.UpdateDefaults()
 
 	v := b.Viper
+	v.SetDefault("sharing.resolution", b.SharingOptions.Resolution)
 	v.SetDefault("sharing.stream", b.SharingOptions.StreamOptions)
 	v.SetDefault("sharing.screengrabbing", b.SharingOptions.ScreenGrabbingOptions)
 }
@@ -73,6 +79,8 @@ func (b *SharingConfig) LoadConfig() error {
 	if err != nil {
 		return err
 	}
+
+	b.SharingOptions.Resolution = b.Viper.GetInt("sharing.resolution")
 
 	err = b.Viper.UnmarshalKey("sharing.stream", &b.SharingOptions.StreamOptions)
 	if err != nil {

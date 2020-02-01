@@ -10,6 +10,7 @@ import (
 	"github.com/xgreenx/desktop-sharing/src/config"
 	"github.com/xgreenx/desktop-sharing/src/sharingnode"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -23,7 +24,7 @@ func ScanInputCommands(node *sharingnode.SharingNode) {
 			node.PrintList()
 		case "screen":
 			if len(arg) < 2 {
-				fmt.Println("Missed node ic")
+				fmt.Println("Missed node id")
 				continue
 			}
 
@@ -33,7 +34,28 @@ func ScanInputCommands(node *sharingnode.SharingNode) {
 				continue
 			}
 
-			err = node.ShareScreen(id)
+			targetDisplay := 0
+
+			if len(arg) > 2 {
+				t, err := strconv.ParseUint(arg[2], 10, 0)
+				if err != nil {
+					fmt.Println(fmt.Sprintf("Wrong target display %s, will use targetDisplay = %d", err.Error(), targetDisplay))
+				} else {
+					targetDisplay = int(t)
+				}
+			}
+
+			control := true
+			if len(arg) > 3 {
+				c, err := strconv.ParseBool(arg[3])
+				if err != nil {
+					fmt.Println(fmt.Sprintf("Wrong control varibale %s, will use control = %s", err.Error(), control))
+				} else {
+					control = c
+				}
+			}
+
+			err = node.ShareScreen(id, targetDisplay, control)
 			if err != nil {
 				fmt.Println("Got error during sharing ", err)
 				continue

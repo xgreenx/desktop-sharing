@@ -64,11 +64,21 @@ func (n *Node) BootStrap() {
 		relayOpt = append(relayOpt, relay.OptHop)
 	}
 
+	staticRelays := make([]peer.AddrInfo, len(n.Config.BootstrapPeers))
+	for i, peerAddr := range n.Config.BootstrapPeers {
+		info, err := peer.AddrInfoFromP2pAddr(peerAddr)
+		if err != nil {
+			panic(err)
+		}
+		staticRelays[i] = *info
+	}
+
 	n.Host, err = libp2p.New(n.Context,
 		libp2p.ListenAddrs([]multiaddr.Multiaddr(n.Config.ListenAddresses)...),
 		libp2p.Identity(n.Config.PrivateKey),
 		libp2p.NATPortMap(),
 		libp2p.EnableRelay(relayOpt...),
+		libp2p.StaticRelays(staticRelays),
 		libp2p.EnableAutoRelay(),
 		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
 			n.RoutingDht, err = dht.New(n.Context, h)
@@ -179,6 +189,7 @@ func (n *Node) PrintList() {
 		if p.ID.String() == n.Host.ID().String() {
 			continue
 		}
+		logger.Debug(p)
 
 		name, err := n.DataDht.GetValue(n.Context, nameKey(p.ID), dht.Quorum(1))
 		if err != nil {

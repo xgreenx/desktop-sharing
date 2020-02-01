@@ -70,6 +70,7 @@ func (q *DataWriter) write() {
 		_, err := q.writer.Write(tmp)
 		if err != nil {
 			q.Error <- err
+			close(q.Error)
 			return
 		} else {
 			goto Repeat
@@ -153,7 +154,6 @@ func (q *DataReader) read() {
 
 		continue
 	Error:
-
 		q.error = err
 		close(q.dataCh)
 		break

@@ -10,12 +10,41 @@ import (
 	"sync"
 )
 
+type RecordResolution struct {
+	Width  int
+	Height int
+}
+
+func NewRecordResolution(width, height int) *RecordResolution {
+	var defaultResolutions = []RecordResolution{
+		{1920, 1080},
+		{1920, 1440},
+		{1280, 720},
+		{854, 480},
+		{640, 480},
+	}
+
+	i := 0
+	for _, r := range defaultResolutions {
+		i++
+		if r.Width > width {
+			continue
+		}
+		if r.Height > height {
+			continue
+		}
+		break
+	}
+
+	result := defaultResolutions[i-1]
+	return &result
+}
+
 type ImageProvider struct {
 	sync.Mutex
 	ScreenOptions
-	RemoteDisplay   DisplayInfo
-	Width           int
-	Height          int
+	Display         DisplayInfo
+	Resolution      *RecordResolution
 	swsContext      *swscale.Context
 	avFormatContext *avformat.Context
 	avInputFormat   *avformat.Input
@@ -25,12 +54,12 @@ type ImageProvider struct {
 	optionsScreen   *avutil.Dictionary
 }
 
-func NewImageProvider(options *ScreenOptions, displaysInfo *DisplaysInfo) (*ImageProvider, error) {
+func NewImageProvider(options *ScreenOptions, displaysInfo *DisplaysInfo, resolution int) (*ImageProvider, error) {
+	display := displaysInfo.Displays[int(options.TargetDisplay)]
 	provider := &ImageProvider{
 		ScreenOptions: *options,
-		Width:         1280,
-		Height:        720,
-		RemoteDisplay: displaysInfo.Displays[int(options.TargetDisplay)],
+		Resolution:    NewRecordResolution(display.Width, resolution),
+		Display:       display,
 	}
 	offsetX := 0
 	for i := 0; i < int(options.TargetDisplay); i++ {
@@ -41,8 +70,8 @@ func NewImageProvider(options *ScreenOptions, displaysInfo *DisplaysInfo) (*Imag
 
 	var err error
 	provider.swsContext, err = swscale.NewContext(
-		&swscale.DataDescription{provider.RemoteDisplay.Width, provider.RemoteDisplay.Height, avutil.PIX_FMT_RGBA},
-		&swscale.DataDescription{provider.Width, provider.Height, avutil.PIX_FMT_YUV420P},
+		&swscale.DataDescription{provider.Display.Width, provider.Display.Height, avutil.PIX_FMT_RGBA},
+		&swscale.DataDescription{provider.Resolution.Width, provider.Resolution.Height, avutil.PIX_FMT_YUV420P},
 	)
 	if err != nil {
 		goto Error
@@ -60,7 +89,7 @@ func NewImageProvider(options *ScreenOptions, displaysInfo *DisplaysInfo) (*Imag
 		goto Error
 	}
 
-	provider.ScreenOptions.GrabbingOptions["video_size"] = fmt.Sprintf("%dx%d", provider.RemoteDisplay.Width, provider.RemoteDisplay.Height)
+	provider.ScreenOptions.GrabbingOptions["video_size"] = fmt.Sprintf("%dx%d", provider.Display.Width, provider.Display.Height)
 	for key, value := range provider.ScreenOptions.GrabbingOptions {
 		err = provider.optionsScreen.Set(key, value)
 		if err != nil {
@@ -100,8 +129,8 @@ func NewImageProvider(options *ScreenOptions, displaysInfo *DisplaysInfo) (*Imag
 		goto Error
 	}
 
-	provider.encFrame.SetWidth(provider.Width)
-	provider.encFrame.SetHeight(provider.Height)
+	provider.encFrame.SetWidth(provider.Resolution.Width)
+	provider.encFrame.SetHeight(provider.Resolution.Height)
 	provider.encFrame.SetPixelFormat(avutil.PIX_FMT_YUV420P)
 
 	err = provider.encFrame.GetBuffer()
@@ -139,7 +168,7 @@ func (i *ImageProvider) Image(onImage func(*avutil.Frame) error) error {
 			return err
 		}
 
-		i.swsContext.Scale(decFrame, 0, i.RemoteDisplay.Height, i.encFrame)
+		i.swsContext.Scale(decFrame, 0, i.Display.Height, i.encFrame)
 		err = onImage(i.encFrame)
 		decFrame.FreeData(0)
 		return err
@@ -210,12 +239,8 @@ func (e *VideoEncoder) Encode(provider *ImageProvider) (chan []byte, error) {
 		goto Error
 	}
 
-	e.codecContext.SetBitRate(900000)
-	e.codecContext.SetWidth(provider.Width)
-	e.codecContext.SetHeight(provider.Height)
-	e.codecContext.SetTimeBase(avutil.NewRational(1, 10))
-	e.codecContext.SetFrameRate(avutil.NewRational(10, 1))
-	e.codecContext.SetMaxBFrames(0)
+	e.codecContext.SetWidth(provider.Resolution.Width)
+	e.codecContext.SetHeight(provider.Resolution.Height)
 	e.codecContext.SetPixelFormat(avutil.PIX_FMT_YUV420P)
 
 	for key, value := range e.Options {

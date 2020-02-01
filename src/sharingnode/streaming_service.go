@@ -31,6 +31,7 @@ type ScreenOptions struct {
 }
 
 type StreamInfo struct {
+	Resolution    int           `json:"resolution"`
 	StreamOptions StreamOptions `json:"stream_options"`
 	ScreenOptions ScreenOptions `json:"screen_options"`
 }
@@ -52,16 +53,15 @@ func NewClient(stream network.Stream, service *StreamService) *Client {
 	}
 }
 
-func (c *Client) Start() {
+func (c *Client) Start() error {
 	for {
 		select {
 		case err := <-c.queue.Error:
-			logger.Error(err)
 			c.Close()
-			return
+			return err
 		case data, ok := <-c.Data:
 			if !ok {
-				return
+				return nil
 			}
 			c.queue.AddData(data)
 		}
@@ -94,7 +94,7 @@ func NewStreamSession() *StreamSession {
 }
 
 func (s *StreamSession) Start(options *StreamInfo, displaysInfo *DisplaysInfo) error {
-	provider, err := NewImageProvider(&options.ScreenOptions, displaysInfo)
+	provider, err := NewImageProvider(&options.ScreenOptions, displaysInfo, options.Resolution)
 	if err != nil {
 		return err
 	}
@@ -154,7 +154,6 @@ func (s *StreamSession) AddClient(client *Client) {
 	defer s.Unlock()
 	s.clients[client] = struct{}{}
 	client.Data <- s.header
-	go client.Start()
 }
 
 func (s *StreamSession) RemoveClient(client *Client) {
@@ -177,7 +176,7 @@ func NewStreamService() *StreamService {
 	return &StreamService{}
 }
 
-func (s *StreamService) AddClient(stream network.Stream, info *StreamInfo, displaysInfo *DisplaysInfo) error {
+func (s *StreamService) AddClient(stream network.Stream, info *StreamInfo, displaysInfo *DisplaysInfo) (*Client, error) {
 	s.Lock()
 	defer s.Unlock()
 	//defer func() {
@@ -199,14 +198,14 @@ func (s *StreamService) AddClient(stream network.Stream, info *StreamInfo, displ
 		err = s.ActiveSession.Start(info, displaysInfo)
 		if err != nil {
 			s.ActiveSession = nil
-			return err
+			return nil, err
 		}
 	}
 
 	client := NewClient(stream, s)
 	s.ActiveSession.AddClient(client)
 
-	return nil
+	return client, nil
 }
 
 func (s *StreamService) RemoveClient(client *Client) {
@@ -219,7 +218,7 @@ func (s *StreamService) RemoveClient(client *Client) {
 	}
 }
 
-func StreamReceive(reader *DataReader, onImage func(img *image.YCbCr) error) {
+func StreamReceive(reader *DataReader, onImage func(img *image.YCbCr) error) chan error {
 	//avutil.SetLogLevel(avutil.LogLevelDebug)
 
 	codec := avcodec.FindDecoderByName("h264")
@@ -246,70 +245,80 @@ func StreamReceive(reader *DataReader, onImage func(img *image.YCbCr) error) {
 		panic(err)
 	}
 
-	defer packet.Free()
-	defer codecContext.Free()
+	errCh := make(chan error, 1)
 
-	needParse := true
-	for {
-		receipt, err := reader.GetData()
-		if err != nil {
-			return
-		}
+	go func() {
+		defer close(errCh)
+		defer packet.Free()
+		defer codecContext.Free()
 
-		data := receipt
-		dataSize := len(data)
-
-		for dataSize > 0 {
-			if needParse {
-				ret, err := parserContext.Parse(data, dataSize, packet)
-				if err != nil {
-					panic(err)
-				}
-
-				data = data[ret:]
-				dataSize = dataSize - ret
-
-				if packet.Size() == 0 {
-					continue
-				}
-			} else {
-				packet.SetData(data)
-				packet.SetSize(dataSize)
-				dataSize = 0
-			}
-
-			onFrame := func(f *avutil.Frame) error {
-				ySize := f.Width() * f.Height()
-				cdSize := f.Width() * f.Height() / 4
-				crSize := f.Width() * f.Height() / 4
-				yData := C.GoBytes(f.Data(0), C.int(ySize))
-				cbData := C.GoBytes(f.Data(1), C.int(cdSize))
-				crData := C.GoBytes(f.Data(2), C.int(crSize))
-				img := image.NewYCbCr(image.Rect(0, 0, f.Width(), f.Height()), image.YCbCrSubsampleRatio420)
-				for i := 0; i < ySize; i++ {
-					img.Y[i] = yData[i]
-					if i < cdSize {
-						img.Cb[i] = cbData[i]
-					}
-					if i < crSize {
-						img.Cr[i] = crData[i]
-					}
-				}
-
-				return onImage(img)
-			}
-
-			_, err = codecContext.DecodeVideo(packet, onFrame)
-
+		needParse := true
+		for {
+			receipt, err := reader.GetData()
 			if err != nil {
-				panic(err)
+				errCh <- err
+				return
 			}
-			if needParse {
-				parserContext.Free()
-				needParse = false
-			} else {
-				C.free(packet.Data())
+
+			data := receipt
+			dataSize := len(data)
+
+			for dataSize > 0 {
+				if needParse {
+					ret, err := parserContext.Parse(data, dataSize, packet)
+					if err != nil {
+						errCh <- err
+						return
+					}
+
+					data = data[ret:]
+					dataSize = dataSize - ret
+
+					if packet.Size() == 0 {
+						continue
+					}
+				} else {
+					packet.SetData(data)
+					packet.SetSize(dataSize)
+					dataSize = 0
+				}
+
+				onFrame := func(f *avutil.Frame) error {
+					ySize := f.Width() * f.Height()
+					cdSize := f.Width() * f.Height() / 4
+					crSize := f.Width() * f.Height() / 4
+					yData := C.GoBytes(f.Data(0), C.int(ySize))
+					cbData := C.GoBytes(f.Data(1), C.int(cdSize))
+					crData := C.GoBytes(f.Data(2), C.int(crSize))
+					img := image.NewYCbCr(image.Rect(0, 0, f.Width(), f.Height()), image.YCbCrSubsampleRatio420)
+					for i := 0; i < ySize; i++ {
+						img.Y[i] = yData[i]
+						if i < cdSize {
+							img.Cb[i] = cbData[i]
+						}
+						if i < crSize {
+							img.Cr[i] = crData[i]
+						}
+					}
+
+					return onImage(img)
+				}
+
+				_, err = codecContext.DecodeVideo(packet, onFrame)
+
+				if err != nil {
+					errCh <- err
+					return
+				}
+				if needParse {
+					parserContext.Free()
+					needParse = false
+				} else {
+					C.free(packet.Data())
+				}
 			}
 		}
-	}
+	}()
+
+	return errCh
 }

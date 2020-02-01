@@ -494,6 +494,10 @@ github.com/xgreenx/fyne v1.2.0-beta1.0.20200130132513-5020917b0792/go.mod h1:Ab+
 github.com/xgreenx/fyne v1.2.0-beta1.0.20200130133251-e848aa9134e5/go.mod h1:Ab+3DIB/FVteW0y4DXfmZv4N3JdnCBh2lHkINI02BOU=
 github.com/xgreenx/fyne v1.2.0-beta1.0.20200130160141-ab430f8be189 h1:UIjDLHS+gHb0Zt+SuOvl87kmSs29sSFfqssxalpY9t4=
 github.com/xgreenx/fyne v1.2.0-beta1.0.20200130160141-ab430f8be189/go.mod h1:Ab+3DIB/FVteW0y4DXfmZv4N3JdnCBh2lHkINI02BOU=
+github.com/xgreenx/fyne v1.2.0-beta1.0.20200130164611-725a61339a47 h1:7b2lvD+97XAipQ49ui4NhL+36KTTVTlCccZNsqa+7tI=
+github.com/xgreenx/fyne v1.2.0-beta1.0.20200130164611-725a61339a47/go.mod h1:Ab+3DIB/FVteW0y4DXfmZv4N3JdnCBh2lHkINI02BOU=
+github.com/xgreenx/fyne v1.2.0-beta1.0.20200130170943-60a8f3b36494 h1:n8Rt0suQ3eR3lzWQhvDV5NssxeH9xvSEd7SNDjR1RRI=
+github.com/xgreenx/fyne v1.2.0-beta1.0.20200130170943-60a8f3b36494/go.mod h1:Ab+3DIB/FVteW0y4DXfmZv4N3JdnCBh2lHkINI02BOU=
 github.com/xgreenx/go-libav v0.0.0-20200129094905-5fc9ee5c8e03 h1:Y54nzjRfU2YV+MJhDEowuV/ej1YTTuVmMERqU/PV0Rk=
 github.com/xgreenx/go-libav v0.0.0-20200129094905-5fc9ee5c8e03/go.mod h1:GcxWh3kP4g1iiSShgVt5clGsPiAluo/F4mSdcu5KuSM=
 github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2/go.mod h1:UETIi67q53MR2AWcXfiuqkDkRtnGDLqkBTpCHuJHxtU=
