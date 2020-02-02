@@ -176,7 +176,13 @@ func (n *Node) connectBootstrap() {
 	wg.Wait()
 }
 
-func (n *Node) PrintList() {
+type FoundNode struct {
+	Id   peer.ID
+	Name string
+	Ping int
+}
+
+func (n *Node) NodeList() chan *FoundNode {
 	logger.Debug("Searching for other peers...")
 	routingDiscovery := discovery.NewRoutingDiscovery(n.RoutingDht)
 	peerChan, err := routingDiscovery.FindPeers(n.Context, NODES_TAG)
@@ -184,27 +190,36 @@ func (n *Node) PrintList() {
 		logger.Error(err)
 	}
 
-	fmt.Println("Starting search")
-	for p := range peerChan {
-		if p.ID.String() == n.Host.ID().String() {
-			continue
-		}
-		logger.Debug(p)
+	chFound := make(chan *FoundNode)
 
-		name, err := n.DataDht.GetValue(n.Context, nameKey(p.ID), dht.Quorum(1))
-		if err != nil {
-			logger.Warning(err)
-		}
+	go func() {
+		fmt.Println("Starting search")
+		for p := range peerChan {
+			if p.ID.String() == n.Host.ID().String() {
+				continue
+			}
+			logger.Debug(p)
 
-		childCtx, cancel := context.WithCancel(n.Context)
-		latency := <-n.PingService.Ping(childCtx, p.ID)
-		cancel()
+			name, err := n.DataDht.GetValue(n.Context, nameKey(p.ID), dht.Quorum(1))
+			if err != nil {
+				logger.Warning(err)
+			}
 
-		status := "success"
-		if latency.Error != nil {
-			status = "error"
+			childCtx, cancel := context.WithCancel(n.Context)
+			latency := <-n.PingService.Ping(childCtx, p.ID)
+			cancel()
+
+			ping := latency.RTT
+			chFound <- &FoundNode{
+				Id:   p.ID,
+				Name: string(name),
+				Ping: int(ping.Milliseconds()),
+			}
+			fmt.Printf("Id: %s, latency: %s, name: %s (%s)\n", p.ID, latency.RTT, name, latency.Error)
 		}
-		fmt.Printf("Id: %s, latency: %s, status: %s, name: %s\n", p.ID, latency.RTT, status, name)
-	}
-	fmt.Println("End search")
+		fmt.Println("End search")
+		close(chFound)
+	}()
+
+	return chFound
 }

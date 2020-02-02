@@ -3,7 +3,6 @@ package sharingnode
 import (
 	"fmt"
 	"fyne.io/fyne"
-	"fyne.io/fyne/app"
 	"fyne.io/fyne/widget"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
@@ -16,11 +15,13 @@ type GUIAllower struct {
 	sync.Mutex
 	node.ConnectionAllower
 	bootstrap *config.BootstrapConfig
+	App       fyne.App
 }
 
-func NewGUIAllower(bootstrapConfig *config.BootstrapConfig) *GUIAllower {
+func NewGUIAllower(bootstrapConfig *config.BootstrapConfig, app fyne.App) *GUIAllower {
 	return &GUIAllower{
 		bootstrap: bootstrapConfig,
+		App:       app,
 	}
 }
 
@@ -61,8 +62,7 @@ func (a GUIAllower) Allow(c *node.ConnectionInfo) (node.AllowResult, error) {
 		}
 	}()
 
-	myapp := app.New()
-	w := myapp.NewWindow("Allow access")
+	w := a.App.NewWindow("Allow access")
 
 	result := node.NewAllowResult()
 
@@ -80,8 +80,14 @@ func (a GUIAllower) Allow(c *node.ConnectionInfo) (node.AllowResult, error) {
 		widget.NewLabel("Current access setup:"),
 	}, pCBs...)
 
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	w.SetOnClosed(func() {
+		wg.Done()
+	})
+
 	okButton := widget.NewButton("Ok", func() {
-		myapp.Quit()
+		w.Close()
 	})
 	okButton.Resize(fyne.NewSize(30, 100))
 
@@ -102,7 +108,8 @@ func (a GUIAllower) Allow(c *node.ConnectionInfo) (node.AllowResult, error) {
 	//time.Sleep(1)
 	//w.Canvas().Refresh(w.Content())
 
-	w.ShowAndRun()
+	w.Show()
+	wg.Wait()
 
 	return result, nil
 }

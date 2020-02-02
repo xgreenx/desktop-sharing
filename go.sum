@@ -500,6 +500,8 @@ github.com/xgreenx/fyne v1.2.0-beta1.0.20200130170943-60a8f3b36494 h1:n8Rt0suQ3e
 github.com/xgreenx/fyne v1.2.0-beta1.0.20200130170943-60a8f3b36494/go.mod h1:Ab+3DIB/FVteW0y4DXfmZv4N3JdnCBh2lHkINI02BOU=
 github.com/xgreenx/go-libav v0.0.0-20200129094905-5fc9ee5c8e03 h1:Y54nzjRfU2YV+MJhDEowuV/ej1YTTuVmMERqU/PV0Rk=
 github.com/xgreenx/go-libav v0.0.0-20200129094905-5fc9ee5c8e03/go.mod h1:GcxWh3kP4g1iiSShgVt5clGsPiAluo/F4mSdcu5KuSM=
+github.com/xgreenx/go-libav v0.0.0-20200201202111-d53b350debca h1:FK7Df4u+6CcM+eY3IDOjxWGGP0V48fU8WYE+2y8JDHg=
+github.com/xgreenx/go-libav v0.0.0-20200201202111-d53b350debca/go.mod h1:GcxWh3kP4g1iiSShgVt5clGsPiAluo/F4mSdcu5KuSM=
 github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2/go.mod h1:UETIi67q53MR2AWcXfiuqkDkRtnGDLqkBTpCHuJHxtU=
 github.com/xordataexchange/crypt v0.0.3-0.20170626215501-b2862e3d0a77/go.mod h1:aYKd//L2LvnjZzWKhF00oedf4jCCReLcmhLdhm1A27Q=
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fyne.io/fyne"
-	"fyne.io/fyne/app"
 	"fyne.io/fyne/canvas"
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"github.com/ipfs/go-log"
@@ -29,14 +28,16 @@ type SharingNode struct {
 	*node.Node
 	*config.SharingOptions
 	StreamService *StreamService
+	App           fyne.App
 }
 
-func NewSharingNode(ctx context.Context, config *config.SharingConfig) *SharingNode {
+func NewSharingNode(ctx context.Context, config *config.SharingConfig, app fyne.App) *SharingNode {
 	n := node.NewNode(ctx, config.BootstrapConfig)
 	return &SharingNode{
 		n,
 		config.SharingOptions,
 		nil,
+		app,
 	}
 }
 
@@ -51,7 +52,7 @@ func (n *SharingNode) BootStrap() {
 			n.Node.Host.SetStreamHandler(protocol.ID(p), n.handleScreenEvent)
 		}
 	}
-	n.AccessVerifier = node.NewAccessVerifier(n.AccessStore, NewGUIAllower(n.Config), n.Host, n.Context, n.DataDht)
+	n.AccessVerifier = node.NewAccessVerifier(n.AccessStore, NewGUIAllower(n.Config, n.App), n.Host, n.Context, n.DataDht)
 	n.StreamService = NewStreamService()
 }
 
@@ -211,7 +212,7 @@ func (n *SharingNode) ShareScreen(id peer.ID, targetDisplay int, control bool) e
 		}
 	}
 
-	return screen.ShowAndRun()
+	return screen.Show(n.App)
 }
 
 type RemoteScreen struct {
@@ -296,9 +297,8 @@ func (r *RemoteScreen) AddControl() error {
 	return nil
 }
 
-func (r *RemoteScreen) ShowAndRun() error {
-	myapp := app.New()
-	win := myapp.NewWindow("Desktop Sharing")
+func (r *RemoteScreen) Show(app fyne.App) error {
+	win := app.NewWindow("Remote Display")
 	win.Resize(fyne.Size{r.Resolution.Width, r.Resolution.Height})
 
 	imgWidget := canvas.NewImageFromImage(image.NewYCbCr(image.Rect(0, 0, r.Resolution.Width, r.Resolution.Height), image.YCbCrSubsampleRatio420))
@@ -332,24 +332,23 @@ func (r *RemoteScreen) ShowAndRun() error {
 		var err error
 		var ok bool
 		if eventSender != nil {
-			select {
-			case err, ok = <-streamErr:
-			case err, ok = <-eventSender.Error():
-			}
-		} else {
-			select {
-			case err, ok = <-streamErr:
-			}
+			go func() {
+				err = <-eventSender.Error()
+				logger.Warning(err)
+			}()
+		}
+		select {
+		case err, ok = <-streamErr:
 		}
 
 		if ok {
 			logger.Info(err)
-			myapp.Quit()
+			win.Close()
 			r.close()
 		}
 	}()
 
-	win.ShowAndRun()
+	win.Show()
 	return nil
 }
 

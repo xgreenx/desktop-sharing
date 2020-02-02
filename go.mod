@@ -4,7 +4,7 @@ go 1.13
 
 replace (
 	fyne.io/fyne => github.com/xgreenx/fyne v1.2.0-beta1.0.20200130170943-60a8f3b36494
-	github.com/imkira/go-libav => github.com/xgreenx/go-libav v0.0.0-20200129094905-5fc9ee5c8e03
+	github.com/imkira/go-libav => github.com/xgreenx/go-libav v0.0.0-20200201202111-d53b350debca
 )
 
 require (
