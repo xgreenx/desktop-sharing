@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/layout"
 	"fyne.io/fyne/theme"
 	"fyne.io/fyne/widget"
+	"github.com/go-gl/glfw/v3.2/glfw"
 	"github.com/ipfs/go-log"
 	"github.com/xgreenx/desktop-sharing/src/config"
 	"github.com/xgreenx/desktop-sharing/src/sharingnode"
@@ -99,6 +100,11 @@ func main() {
 		panic(err)
 	}
 
+	err = conf.ParseFlags()
+	if err != nil {
+		panic(err)
+	}
+
 	conf.UpdateDefaults()
 
 	err = conf.WriteConfig()
@@ -149,10 +155,12 @@ func main() {
 						return
 					}
 
-					err = node.ShareScreen(tmp.Id, 0, true)
-					if err != nil {
-						fmt.Println(err)
-					}
+					go func() {
+						err = node.ShareScreen(tmp.Id, 0, true)
+						if err != nil {
+							fmt.Println(err)
+						}
+					}()
 				}),
 			)
 
@@ -195,6 +203,11 @@ func main() {
 		),
 	)
 
+	var sizeCallback glfw.RefreshCallback
+	sizeCallback = w.Viewport().SetRefreshCallback(func(win *glfw.Window) {
+		scrollContainer.Resize(fyne.NewSize(w.Size().Width, w.Size().Height-allElements.MinSize().Height))
+		sizeCallback(win)
+	})
 	w.SetContent(allElements)
 	w.CenterOnScreen()
 

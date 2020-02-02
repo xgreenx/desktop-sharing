@@ -208,7 +208,7 @@ func (n *SharingNode) ShareScreen(id peer.ID, targetDisplay int, control bool) e
 	if control {
 		err = screen.AddControl()
 		if err != nil {
-			return err
+			logger.Error(err)
 		}
 	}
 
