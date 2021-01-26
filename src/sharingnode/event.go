@@ -4,7 +4,7 @@ import "C"
 import (
 	"encoding/json"
 	"fyne.io/fyne"
-	"github.com/go-gl/glfw/v3.2/glfw"
+	"github.com/go-gl/glfw/v3.3/glfw"
 	"github.com/go-vgo/robotgo"
 	"github.com/libp2p/go-libp2p-core/network"
 	"math"
@@ -143,13 +143,19 @@ func (e *EventSender) scrollEvent(w *glfw.Window, xoff float64, yoff float64) {
 }
 
 func (e *EventSender) Subscribe(win fyne.Window) {
-	win.Viewport().SetCursorPosCallback(e.mouseMoveEvent)
-	win.Viewport().SetMouseButtonCallback(e.mouseClick)
-	win.Viewport().SetScrollCallback(e.scrollEvent)
-	win.Viewport().SetKeyCallback(e.keyEvent)
-	var superSizeCallback glfw.SizeCallback
-	superSizeCallback = win.Viewport().SetSizeCallback(func(w *glfw.Window, width int, height int) {
-		superSizeCallback(w, width, height)
+	win.RunOnMainWhenCreated(func() {
+		view := win.Viewport()
+		view.SetCursorPosCallback(e.mouseMoveEvent)
+		view.SetMouseButtonCallback(e.mouseClick)
+		view.SetScrollCallback(e.scrollEvent)
+		view.SetKeyCallback(e.keyEvent)
+		var superSizeCallback glfw.SizeCallback
+		superSizeCallback = view.SetSizeCallback(func(w *glfw.Window, width int, height int) {
+			superSizeCallback(w, width, height)
+			e.localWidth = width
+			e.localHeight = height
+		})
+		width, height := view.GetSize()
 		e.localWidth = width
 		e.localHeight = height
 	})

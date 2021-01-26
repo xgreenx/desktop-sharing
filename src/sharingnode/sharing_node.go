@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fyne.io/fyne"
 	"fyne.io/fyne/canvas"
-	"github.com/go-gl/glfw/v3.2/glfw"
 	"github.com/ipfs/go-log"
 	"github.com/kbinani/screenshot"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -304,10 +303,8 @@ func (r *RemoteScreen) Show(app fyne.App) error {
 	imgWidget := canvas.NewImageFromImage(image.NewYCbCr(image.Rect(0, 0, r.Resolution.Width, r.Resolution.Height), image.YCbCrSubsampleRatio420))
 	win.SetContent(imgWidget)
 
-	var closeCallback glfw.CloseCallback
-	closeCallback = win.Viewport().SetCloseCallback(func(w *glfw.Window) {
+	win.SetOnClosed(func() {
 		r.close()
-		closeCallback(w)
 	})
 
 	onImage := func(img *image.YCbCr) error {
